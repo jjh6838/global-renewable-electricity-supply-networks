@@ -1,7 +1,7 @@
 #!/bin/bash --login
 #SBATCH --job-name=p15_t3
-#SBATCH --partition=Medium
-#SBATCH --time=48:00:00
+#SBATCH --partition=Long
+#SBATCH --time=168:00:00
 #SBATCH --mem=95G
 #SBATCH --ntasks=1
 #SBATCH --nodes=1

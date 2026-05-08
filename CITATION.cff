@@ -10,6 +10,7 @@ authors:
   orcid: "https://orcid.org/0000-0002-2024-9191"
 - family-names: "Thomas"
   given-names: "Fred"
+  orcid: "https://orcid.org/0000-0002-8441-5638"
 title: "Global Renewable Electricity Supply and Networks Dataset"
 version: 1.0.0
 url: "https://github.com/jjh6838/global-renewable-electricity-supply-networks"
