@@ -242,7 +242,7 @@ final_merged_df = pd.merge(
 # Safeguard: For countries with valid NDC categories, backfill blank 2030
 # technology targets using their own 2024 values. Countries without a category
 # keep NaNs so they can be handled later via regional benchmarks.
-columns_to_fill = ["Hydro_2030", "Solar_2030", "Wind_2030"]
+columns_to_fill = ["Hydro_2030", "Solar_2030", "Wind_2030", "Other Renewables_2030"]
 for col in columns_to_fill:
     corresponding_2024_col = col.replace("_2030", "_2024")
     if corresponding_2024_col in final_merged_df.columns:
