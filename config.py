@@ -63,7 +63,7 @@ def get_bigdata_path(folder_name):
 # COMMON SETTINGS
 # =============================================================================
 COMMON_CRS = "EPSG:4326"  # WGS84 for input/output
-ANALYSIS_YEAR = 2024  # Year for supply-demand analysis: 2024, 2030, or 2050
+ANALYSIS_YEAR = int(os.environ.get("ANALYSIS_YEAR", "2024"))  # Year for supply-demand analysis: 2024, 2030, or 2050
 DEMAND_TYPES = ["Solar", "Wind", "Hydro", "Other Renewables", "Nuclear", "Fossil"]
 
 # Supply factor for sensitivity analysis: each facility supplies X% of its capacity

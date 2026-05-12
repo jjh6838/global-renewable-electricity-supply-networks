@@ -767,7 +767,7 @@ chmod +x submit_*.sh parallel_scripts/*.sh parallel_scripts_siting/*.sh
 | Flag | Description |
 |------|-------------|
 | (none) | Run single scenario (100% supply factor) |
-| `--run-all-years` | Run model years 2024, 2030, 2050 in one command (supported by `submit_all_parallel.sh` and `submit_all_parallel_siting.sh`) |
+| `--run-all-years` | Run model years 2024, 2030, 2050 in one command and override config year per submission (supported by `submit_all_parallel.sh` and `submit_all_parallel_siting.sh`) |
 | `--run-all-scenarios` | Run all 5 scenarios (100%, 90%, 80%, 70%, 60%) |
 | `--supply-factor 0.9` | Run single specific supply factor (e.g., 90%) |
 

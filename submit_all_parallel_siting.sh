@@ -65,16 +65,17 @@ fi
 
 # Build SBATCH_EXPORT based on flags and determine log directory
 if [ -n "$SUPPLY_FACTOR" ]; then
-    SBATCH_EXPORT="--export=ALL,SUPPLY_FACTOR=$SUPPLY_FACTOR"
+    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR,SUPPLY_FACTOR=$SUPPLY_FACTOR"
     # Convert supply factor to percentage (e.g., 0.9 -> 90)
     SCENARIO_PCT=$(echo "$SUPPLY_FACTOR * 100" | bc | cut -d. -f1)
     LOG_DIR="outputs_per_country/parquet/${ANALYSIS_YEAR}_supply_${SCENARIO_PCT}%/logs"
     echo "[INFO] Running single scenario: $SUPPLY_FACTOR (supply factor ${SCENARIO_PCT}%)"
 elif [ -n "$RUN_ALL_SCENARIOS" ]; then
-    SBATCH_EXPORT="--export=ALL,RUN_ALL_SCENARIOS=1"
+    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR,RUN_ALL_SCENARIOS=1"
     LOG_DIR="outputs_per_country/parquet/logs_run_all_scenarios"
     echo "[INFO] Running ALL scenarios (100%, 90%, 80%, 70%, 60%)"
 else
+    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR"
     LOG_DIR="outputs_per_country/parquet/${ANALYSIS_YEAR}_supply_100%/logs"
     echo "[INFO] Running default scenario: 100%"
 fi
