@@ -2,7 +2,7 @@
 #SBATCH --job-name=p01_t1
 #SBATCH --partition=Long
 #SBATCH --time=168:00:00
-#SBATCH --mem=300G
+#SBATCH --mem=95G
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=40
@@ -15,7 +15,7 @@ cd "$SLURM_SUBMIT_DIR"
 
 echo "[INFO] Starting parallel script 1/40 (T1) at $(date)"
 echo "[INFO] Processing 1 countries in this batch: CHN"
-echo "[INFO] Tier: T1 | Memory: 300G | CPUs: 40 | Time: 168:00:00"
+echo "[INFO] Tier: T1 | Memory: 95G | CPUs: 40 | Time: 168:00:00"
 
 # --- directories ---
 mkdir -p outputs_per_country/logs outputs_global

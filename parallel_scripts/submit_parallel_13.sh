@@ -6,7 +6,6 @@
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=40
-#SBATCH --exclude=ouce-cn62
 #SBATCH --output=outputs_per_country/logs/parallel_13_%j.out
 #SBATCH --error=outputs_per_country/logs/parallel_13_%j.err
 #SBATCH --mail-type=END,FAIL
@@ -15,7 +14,7 @@ set -euo pipefail
 cd "$SLURM_SUBMIT_DIR"
 
 echo "[INFO] Starting parallel script 13/40 (T3) at $(date)"
-echo "[INFO] Processing 1 countries in this batch: KAZ"
+echo "[INFO] Processing 1 countries in this batch: IRN"
 echo "[INFO] Tier: T3 | Memory: 95G | CPUs: 40 | Time: 48:00:00"
 
 # --- directories ---
@@ -46,18 +45,18 @@ fi
 
 # Process countries in this batch
 
-echo "[INFO] Processing KAZ (T3)..."
+echo "[INFO] Processing IRN (T3)..."
 MAX_RETRIES=3
 for ATTEMPT in $(seq 1 $MAX_RETRIES); do
-    if $PY process_country_supply.py KAZ $SCENARIO_FLAG --output-dir outputs_per_country; then
-        echo "[SUCCESS] KAZ completed (attempt $ATTEMPT)"
+    if $PY process_country_supply.py IRN $SCENARIO_FLAG --output-dir outputs_per_country; then
+        echo "[SUCCESS] IRN completed (attempt $ATTEMPT)"
         break
     else
         if [ "$ATTEMPT" -lt "$MAX_RETRIES" ]; then
-            echo "[WARN] KAZ failed on attempt $ATTEMPT/$MAX_RETRIES - retrying in 10s..."
+            echo "[WARN] IRN failed on attempt $ATTEMPT/$MAX_RETRIES - retrying in 10s..."
             sleep 10
         else
-            echo "[ERROR] KAZ failed after $MAX_RETRIES attempts"
+            echo "[ERROR] IRN failed after $MAX_RETRIES attempts"
         fi
     fi
 done

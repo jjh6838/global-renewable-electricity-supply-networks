@@ -67,14 +67,14 @@ if [ -z "$ISO3" ]; then
     echo "  $0 KEN                      # Single country, 100% scenario, auto-detect tier"
     echo "  $0 KEN --run-all-scenarios  # Single country, all 5 scenarios"
     echo "  $0 KEN --supply-factor 0.9  # Single country, 90% scenario"
-    echo "  $0 CHN --tier 1             # Use Tier 1 resources (450G memory)"
+    echo "  $0 CHN --tier 1             # Use Tier 1 resources (95G memory)"
     echo "  $0 USA --tier 2             # Use Tier 2 resources (95G memory)"
     echo ""
     echo "Tier resources:"
-    echo "  T1: 300G, 40 CPUs, 168:00:00 (Long)  - CHN"
-    echo "  T2: 95G, 40 CPUs, 168:00:00 (Long)   - USA, IND, BRA, DEU, FRA"
+    echo "  T1: 95G, 40 CPUs, 168:00:00 (Long)  - CHN"
+    echo "  T2: 95G, 40 CPUs, 168:00:00 (Long)   - USA, IND, BRA, DEU, FRA, RUS"
     echo "  T3: 95G, 40 CPUs, 48:00:00 (Medium)  - CAN, MEX, RUS, AUS, etc."
-    echo "  T4: 95G, 40 CPUs, 12:00:00 (Short)   - TUR, NGA, VEN, ETH, etc."
+    echo "  T4: 25G, 40 CPUs, 12:00:00 (Short)   - TUR, NGA, VEN, ETH, etc."
     echo "  T5: 25G, 40 CPUs, 12:00:00 (Short)   - All others (default)"
     exit 1
 fi
@@ -84,9 +84,9 @@ ISO3=$(echo "$ISO3" | tr '[:lower:]' '[:upper:]')
 
 # --- Auto-detect tier based on country if not specified ---
 TIER_1="CHN"
-TIER_2="BRA DEU FRA USA IND RUS"
-TIER_3="ARG MEX EGY AUS CAN KAZ ZAF IDN SAU IRN"
-TIER_4="TUR IRQ SWE TCD MLI DZA NOR PER MMR NGA PAK ETH GEO VEN COL PHL JPN UKR SDN GHA"
+TIER_2="FRA USA IND RUS BRA DEU"
+TIER_3="ZAF EGY KAZ IRN MEX CAN ARG AUS IDN SAU"
+TIER_4="GEO PHL MMR TCD VEN PAK TUR NGA ETH NOR PER DZA UKR MLI SDN GHA COL IRQ SWE JPN"
 
 if [ -z "$TIER" ]; then
     if [[ " $TIER_1 " =~ " $ISO3 " ]]; then
@@ -108,7 +108,7 @@ case $TIER in
     1)
         PARTITION="Long"
         TIME="168:00:00"
-        MEM="300G"
+        MEM="95G"
         CPUS="40"
         ;;
     2)
@@ -126,7 +126,7 @@ case $TIER in
     4)
         PARTITION="Short"
         TIME="12:00:00"
-        MEM="95G"
+        MEM="25G"
         CPUS="40"
         ;;
     5|*)
@@ -139,10 +139,17 @@ esac
 
 echo "[INFO] Resources: Partition=$PARTITION, Time=$TIME, Memory=$MEM, CPUs=$CPUS"
 
+# Resolve model year from config.py (override with ANALYSIS_YEAR env var if set)
+ANALYSIS_YEAR="${ANALYSIS_YEAR:-$(python - <<'PY'
+from config import ANALYSIS_YEAR
+print(ANALYSIS_YEAR)
+PY
+)}"
+
 # --- Determine scenario flag and log directory ---
 if [ -n "$SUPPLY_FACTOR" ]; then
     SCENARIO_PCT=$(echo "$SUPPLY_FACTOR * 100" | bc | cut -d. -f1)
-    LOG_DIR="outputs_per_country/parquet/2030_supply_${SCENARIO_PCT}%/logs"
+    LOG_DIR="outputs_per_country/parquet/${ANALYSIS_YEAR}_supply_${SCENARIO_PCT}%/logs"
     SCENARIO_DESC="supply factor ${SCENARIO_PCT}%"
     SBATCH_EXPORT="--export=ALL,SUPPLY_FACTOR=$SUPPLY_FACTOR"
 elif [ -n "$RUN_ALL_SCENARIOS" ]; then
@@ -150,7 +157,7 @@ elif [ -n "$RUN_ALL_SCENARIOS" ]; then
     SCENARIO_DESC="ALL scenarios (100%, 90%, 80%, 70%, 60%)"
     SBATCH_EXPORT="--export=ALL,RUN_ALL_SCENARIOS=1"
 else
-    LOG_DIR="outputs_per_country/parquet/2030_supply_100%/logs"
+    LOG_DIR="outputs_per_country/parquet/${ANALYSIS_YEAR}_supply_100%/logs"
     SCENARIO_DESC="100% (default)"
     SBATCH_EXPORT=""
 fi

@@ -196,11 +196,26 @@ chmod +x submit_all_parallel.sh parallel_scripts/*.sh
 # Submit all 40 parallel jobs (single scenario: 100%)
 ./submit_all_parallel.sh
 
+# OR: Submit all three model years (2024, 2030, 2050) at once
+./submit_all_parallel.sh --run-all-years
+
 # OR: Submit with ALL scenarios (100%, 90%, 80%, 70%, 60%)
 ./submit_all_parallel.sh --run-all-scenarios
 
+# OR: Submit all years with ALL scenarios
+./submit_all_parallel.sh --run-all-years --run-all-scenarios
+
 # OR: Submit with a specific supply factor (e.g., 90% only)
 ./submit_all_parallel.sh --supply-factor 0.9
+
+# OR: Submit all years with a specific supply factor
+./submit_all_parallel.sh --run-all-years --supply-factor 0.9
+
+# Siting: submit all generated siting jobs for current year
+./submit_all_parallel_siting.sh
+
+# Siting: submit all years at once
+./submit_all_parallel_siting.sh --run-all-years
 
 # Monitor progress
 squeue -u $USER

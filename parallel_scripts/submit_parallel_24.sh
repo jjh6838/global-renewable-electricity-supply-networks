@@ -2,7 +2,7 @@
 #SBATCH --job-name=p24_t4
 #SBATCH --partition=Short
 #SBATCH --time=12:00:00
-#SBATCH --mem=95G
+#SBATCH --mem=25G
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=40
@@ -15,7 +15,7 @@ cd "$SLURM_SUBMIT_DIR"
 
 echo "[INFO] Starting parallel script 24/40 (T4) at $(date)"
 echo "[INFO] Processing 2 countries in this batch: PER, PHL"
-echo "[INFO] Tier: T4 | Memory: 95G | CPUs: 40 | Time: 12:00:00"
+echo "[INFO] Tier: T4 | Memory: 25G | CPUs: 40 | Time: 12:00:00"
 
 # --- directories ---
 mkdir -p outputs_per_country/logs outputs_global

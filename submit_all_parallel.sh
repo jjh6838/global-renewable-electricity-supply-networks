@@ -1,31 +1,31 @@
 #!/bin/bash
 # Submit all parallel jobs immediately (SLURM will queue them automatically)
-# Usage: ./submit_all_parallel.sh [--run-all-scenarios] [--supply-factor <value>]
+# Usage: ./submit_all_parallel.sh [--run-all-years] [--run-all-scenarios] [--supply-factor <value>]
 
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     cd "$SCRIPT_DIR"
 
 # --- Parse arguments ---
 RUN_ALL_SCENARIOS=""
+RUN_ALL_YEARS=""
 SUPPLY_FACTOR=""
 SBATCH_EXPORT=""
 
-# Resolve analysis year from config.py so scenario/log paths follow 2024/2030/2050 settings.
-ANALYSIS_YEAR=$(python - <<'PY'
+# Resolve model year from config.py (override with ANALYSIS_YEAR env var if set)
+ANALYSIS_YEAR="${ANALYSIS_YEAR:-$(python - <<'PY'
 from config import ANALYSIS_YEAR
 print(ANALYSIS_YEAR)
 PY
-)
-
-if [ -z "$ANALYSIS_YEAR" ]; then
-    ANALYSIS_YEAR="2030"
-    echo "[WARN] Could not resolve ANALYSIS_YEAR from config.py; defaulting to ${ANALYSIS_YEAR}"
-fi
+)}"
 
 while [ $# -gt 0 ]; do
     case $1 in
         --run-all-scenarios)
             RUN_ALL_SCENARIOS="1"
+            shift
+            ;;
+        --run-all-years)
+            RUN_ALL_YEARS="1"
             shift
             ;;
         --supply-factor)
@@ -38,16 +38,33 @@ while [ $# -gt 0 ]; do
             ;;
         -*)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--run-all-scenarios] [--supply-factor <value>]"
+            echo "Usage: $0 [--run-all-years] [--run-all-scenarios] [--supply-factor <value>]"
             exit 1
             ;;
         *)
             echo "Unknown argument: $1"
-            echo "Usage: $0 [--run-all-scenarios] [--supply-factor <value>]"
+            echo "Usage: $0 [--run-all-years] [--run-all-scenarios] [--supply-factor <value>]"
             exit 1
             ;;
     esac
 done
+
+# Convenience mode: submit 2024, 2030, 2050 in one command.
+if [ -n "$RUN_ALL_YEARS" ]; then
+    echo "[INFO] Running all years (2024, 2030, 2050)"
+    for YEAR in 2024 2030 2050; do
+        echo ""
+        echo "[INFO] Submitting year: $YEAR"
+        if [ -n "$SUPPLY_FACTOR" ]; then
+            ANALYSIS_YEAR="$YEAR" "$0" --supply-factor "$SUPPLY_FACTOR"
+        elif [ -n "$RUN_ALL_SCENARIOS" ]; then
+            ANALYSIS_YEAR="$YEAR" "$0" --run-all-scenarios
+        else
+            ANALYSIS_YEAR="$YEAR" "$0"
+        fi
+    done
+    exit 0
+fi
 
 # Build SBATCH_EXPORT based on flags
 if [ -n "$SUPPLY_FACTOR" ]; then
@@ -119,8 +136,8 @@ echo "Check completion:"
 echo "  find outputs_per_country/parquet -name '*.parquet' | wc -l"
 echo ""
 echo "Resource allocation summary (tiered partition strategy):"
-echo "  Tier 1 (CHN, USA):              1 country/script  | Interactive partition (168h) | 95G, 40 CPUs"
-echo "  Tier 2 (IND, CAN, MEX):         1 country/script  | Medium partition (48h)       | 95G, 40 CPUs"
-echo "  Tier 3 (RUS, BRA, AUS, etc.):   1 country/script  | Medium partition (48h)       | 95G, 40 CPUs"
-echo "  Tier 4 (TUR, NGA, COL, etc.):   2 countries/script | Short partition (12h)        | 95G, 40 CPUs"
-echo "  Tier 5 (all others):           11 countries/script | Short partition (12h)        | 25G, 40 CPUs"
+echo "  Tier 1 (CHN):                   1 country/script  | Long partition (168h)        | 95G, 40 CPUs"
+echo "  Tier 2 (USA, IND, BRA, etc.):   1 country/script  | Long partition (168h)        | 95G, 40 CPUs"
+echo "  Tier 3 (CAN, MEX, AUS, etc.):   1 country/script  | Medium partition (48h)       | 95G, 40 CPUs"
+echo "  Tier 4 (TUR, NGA, COL, etc.):   2 countries/script | Short partition (12h)        | 25G, 40 CPUs"
+echo "  Tier 5 (all others):           12 countries/script | Short partition (12h)        | 25G, 40 CPUs"

@@ -1665,9 +1665,128 @@ def _reconstruct_path(node, parents):
     return list(reversed(path))
 
 
+def _build_csr_graph(network_graph):
+    """Build/cache a scipy CSR adjacency for the network graph.
+
+    Returns (csr_matrix, node_to_idx, idx_to_node).
+    Edge weight uses the same fallback as the Python Dijkstra:
+    edge_data['weight'] -> edge_data['weight_cached'] -> 1.0, then None -> 0.0.
+    """
+    cached = network_graph.graph.get('_csr_cache')
+    if cached is not None:
+        return cached
+
+    from scipy.sparse import csr_matrix
+
+    nodes = list(network_graph.nodes())
+    node_to_idx = {n: i for i, n in enumerate(nodes)}
+    n = len(nodes)
+
+    # Pre-size arrays: every undirected edge contributes 2 directed entries.
+    m = network_graph.number_of_edges()
+    rows = np.empty(2 * m, dtype=np.int32)
+    cols = np.empty(2 * m, dtype=np.int32)
+    data = np.empty(2 * m, dtype=np.float64)
+
+    k = 0
+    # Match original Python Dijkstra behavior:
+    #  - 0-weight edges ARE traversable in the original. scipy.csgraph treats 0
+    #    as a structural zero (missing edge), so we clamp 0 -> tiny epsilon so
+    #    the edge survives CSR encoding.
+    #  - NaN/None weights are NOT traversed by the original (`dist + NaN = NaN`,
+    #    `NaN < anything = False`). We drop them for the same effect.
+    ZERO_WEIGHT_EPS = 1e-9
+    for u, v, edata in network_graph.edges(data=True):
+        w = edata.get('weight')
+        if w is None:
+            w = edata.get('weight_cached')
+        try:
+            w = float(w) if w is not None else None
+        except (TypeError, ValueError):
+            w = None
+        if w is None or not np.isfinite(w):
+            continue
+        if w <= 0.0:
+            w = ZERO_WEIGHT_EPS
+        ui = node_to_idx[u]
+        vi = node_to_idx[v]
+        rows[k] = ui; cols[k] = vi; data[k] = w; k += 1
+        rows[k] = vi; cols[k] = ui; data[k] = w; k += 1
+
+    csr = csr_matrix((data[:k], (rows[:k], cols[:k])), shape=(n, n))
+    network_graph.graph['_csr_cache'] = (csr, node_to_idx, nodes)
+    return network_graph.graph['_csr_cache']
+
+
+def _reconstruct_paths_for_active_connections(active_connections, network_graph):
+    """Fill in path_nodes/path_segments for active supply connections.
+
+    Distance calculation skips path tracking to save memory; this runs one
+    scipy Dijkstra (with predecessors) per supplying facility and reconstructs
+    paths for the centroids that actually received supply from it.
+    """
+    if not active_connections or network_graph is None:
+        return
+
+    from scipy.sparse.csgraph import dijkstra
+
+    csr, node_to_idx, idx_to_node = _build_csr_graph(network_graph)
+
+    # Group connections by facility node so we run scipy Dijkstra at most once per facility
+    by_facility = defaultdict(list)
+    for conn in active_connections:
+        fac_node = conn.get('_facility_node')
+        if fac_node is None:
+            continue
+        by_facility[fac_node].append(conn)
+
+    for fac_node, conns in by_facility.items():
+        fac_idx = node_to_idx.get(fac_node)
+        if fac_idx is None:
+            continue
+
+        # No `limit` here either — these are confirmed-active connections; the
+        # distance was already accepted upstream and we just need predecessors
+        # to rebuild the same shortest path the distance pass implied.
+        dist_arr, predecessors = dijkstra(
+            csr, indices=fac_idx, return_predecessors=True
+        )
+
+        for conn in conns:
+            cen_node = conn.get('_centroid_node')
+            if cen_node is None:
+                continue
+            cen_idx = node_to_idx.get(cen_node)
+            if cen_idx is None or not np.isfinite(dist_arr[cen_idx]):
+                continue
+
+            # Walk predecessors back to source
+            path_idx = []
+            cur = cen_idx
+            # scipy uses -9999 as sentinel for "no predecessor"
+            while cur != -9999 and cur != fac_idx:
+                path_idx.append(cur)
+                cur = int(predecessors[cur])
+                if cur == -9999:
+                    break
+            if cur == fac_idx:
+                path_idx.append(fac_idx)
+            path_nodes = [idx_to_node[i] for i in reversed(path_idx)]
+
+            conn['path_nodes'] = path_nodes
+            conn['network_path'] = path_nodes
+            conn['path_segments'] = _build_path_segments_from_nodes(path_nodes, network_graph)
+
+
 def calculate_facility_distances(centroids_gdf, facilities_gdf, network_graph):
-    """Compute shortest-path distances from each facility to nearby centroids."""
+    """Compute shortest-path distances from each facility to nearby centroids.
+
+    Uses scipy.sparse.csgraph.dijkstra (C-level, releases GIL) for the inner
+    shortest-path computation. Path reconstruction is deferred to active
+    supply connections only (see _reconstruct_paths_for_active_connections).
+    """
     from scipy.spatial import cKDTree
+    from scipy.sparse.csgraph import dijkstra as csgraph_dijkstra
 
     num_centroids = len(centroids_gdf)
     num_facilities = len(facilities_gdf)
@@ -1702,118 +1821,48 @@ def calculate_facility_distances(centroids_gdf, facilities_gdf, network_graph):
 
     centroid_idx_by_pos = {pos: idx for pos, idx in enumerate(centroid_indices)}
 
-    # Precompute facility metadata for downstream use
-    facility_meta = {}
-    for idx in facilities_gdf.index:
-        fac = facilities_gdf.loc[idx]
-        fac_utm_geom = facilities_utm.loc[idx].geometry
-        gem_id_raw = fac.get('GEM unit/phase ID', '')
-        facility_meta[idx] = {
-            'type': fac.get('Grouped_Type', ''),
-            'capacity': fac.get('Adjusted_Capacity_MW', 0),
-            'lat': fac.geometry.y,
-            'lon': fac.geometry.x,
-            'utm_x': fac_utm_geom.x,
-            'utm_y': fac_utm_geom.y,
-            'gem_id': str(gem_id_raw) if pd.notna(gem_id_raw) and gem_id_raw != '' else ''
-        }
-
     search_radius_m = FACILITY_SEARCH_RADIUS_KM * 1000.0
+
+    # Build CSR graph once (cached on network_graph)
+    print("  Building CSR adjacency for scipy Dijkstra...")
+    csr_build_start = time.time()
+    csr, node_to_idx, idx_to_node = _build_csr_graph(network_graph)
+    print(f"  CSR built in {time.time() - csr_build_start:.2f}s ({csr.shape[0]:,} nodes, {csr.nnz:,} directed entries)")
+
+    # Precompute centroid node -> scipy index and centroid_idx (only those connected to graph)
+    centroid_node_to_csridx = {}
+    csridx_to_centroid_idx = {}
+    for cidx, node in centroid_mapping.items():
+        gi = node_to_idx.get(node)
+        if gi is not None:
+            centroid_node_to_csridx[node] = gi
+            csridx_to_centroid_idx[gi] = cidx
+    centroid_csr_indices_array = np.fromiter(csridx_to_centroid_idx.keys(), dtype=np.int64) if csridx_to_centroid_idx else np.empty(0, dtype=np.int64)
+    centroid_csr_idx_list = list(csridx_to_centroid_idx.keys())
+    centroid_idx_aligned = [csridx_to_centroid_idx[i] for i in centroid_csr_idx_list]
+
     centroid_results = defaultdict(list)
-    
-    # Parallel facility distance calculation for large datasets
+
     facility_items = list(facility_mapping.items())
-    
-    if len(facility_items) > 20 and num_centroids > 1000:  # Parallel for medium-large countries
-        print(f"  Using parallel processing for {len(facility_items)} facilities with {min(MAX_WORKERS, len(facility_items))} workers...")
-        
-        def process_facility_batch(batch_facilities):
-            """Process a batch of facilities and return results"""
-            batch_results = defaultdict(list)
-            
-            for facility_idx, facility_node in batch_facilities:
-                if facility_node is None:
-                    continue
-                
-                facility_geom_utm = facilities_utm.loc[facility_idx].geometry
-                candidate_positions = []
-                if centroid_tree is not None:
-                    candidate_positions = centroid_tree.query_ball_point((facility_geom_utm.x, facility_geom_utm.y), r=search_radius_m)
-                else:
-                    candidate_positions = list(range(len(centroid_indices)))
-                
-                if not candidate_positions:
-                    continue
-                
-                candidate_centroid_idxs = [centroid_idx_by_pos[pos] for pos in candidate_positions]
-                target_nodes = {
-                    centroid_mapping[idx]
-                    for idx in candidate_centroid_idxs
-                    if idx in centroid_mapping
-                }
-                
-                if not target_nodes:
-                    continue
-                
-                reached, parents = _dijkstra_to_targets(network_graph, facility_node, target_nodes)
-                
-                if not reached:
-                    continue
-                
-                meta = facility_meta[facility_idx]
-                
-                for centroid_node, distance_m in reached.items():
-                    centroid_idx = network_graph.nodes[centroid_node].get('centroid_idx')
-                    if centroid_idx is None:
-                        continue
-                    
-                    path_nodes = _reconstruct_path(centroid_node, parents)
-                    centroid_geom_wgs = centroids_gdf.loc[centroid_idx].geometry
-                    euclidean_distance_km = ((centroid_geom_wgs.x - meta['lon']) ** 2 + (centroid_geom_wgs.y - meta['lat']) ** 2) ** 0.5 * 111.32
-                    
-                    batch_results[centroid_idx].append({
-                        'facility_idx': facility_idx,
-                        'distance_km': distance_m / 1000.0,
-                        'path_nodes': path_nodes,
-                        'path_segments': [],
-                        'total_segments': max(len(path_nodes) - 1, 0),
-                        'facility_type': meta['type'],
-                        'facility_capacity': meta['capacity'],
-                        'facility_lat': meta['lat'],
-                        'facility_lon': meta['lon'],
-                        'gem_id': meta['gem_id'],
-                        'euclidean_distance_km': euclidean_distance_km,
-                        'network_path': path_nodes
-                    })
-            
-            return batch_results
-        
-        # Divide facilities into batches for parallel processing
-        batch_size = max(1, len(facility_items) // MAX_WORKERS)
-        facility_batches = [facility_items[i:i+batch_size] for i in range(0, len(facility_items), batch_size)]
-        
-        # Process facilities in parallel
-        with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(facility_batches))) as executor:
-            futures = [executor.submit(process_facility_batch, batch) for batch in facility_batches]
-            
-            for i, future in enumerate(futures):
-                batch_result = future.result()
-                for centroid_idx, distances in batch_result.items():
-                    centroid_results[centroid_idx].extend(distances)
-                
-                if (i + 1) % max(1, len(futures) // 10) == 0 or (i + 1) == len(futures):
-                    facilities_processed = min((i+1) * batch_size, len(facility_items))
-                    print(f"    Processed {facilities_processed}/{len(facility_items)} facilities...")
-    else:
-        # Serial processing for small datasets (avoid threading overhead)
-        for facility_idx, facility_node in facility_items:
+
+    def process_facility_batch(batch_facilities):
+        """Run scipy single-source Dijkstra for each facility in the batch."""
+        batch_results = defaultdict(list)
+
+        for facility_idx, facility_node in batch_facilities:
             if facility_node is None:
                 continue
 
+            fac_csr_idx = node_to_idx.get(facility_node)
+            if fac_csr_idx is None:
+                continue
+
+            # Spatial pre-filter: which centroids could possibly be in range?
             facility_geom_utm = facilities_utm.loc[facility_idx].geometry
-            candidate_positions = []
             if centroid_tree is not None:
-                candidate_positions = centroid_tree.query_ball_point((facility_geom_utm.x, facility_geom_utm.y), r=search_radius_m)
+                candidate_positions = centroid_tree.query_ball_point(
+                    (facility_geom_utm.x, facility_geom_utm.y), r=search_radius_m
+                )
             else:
                 candidate_positions = list(range(len(centroid_indices)))
 
@@ -1821,44 +1870,63 @@ def calculate_facility_distances(centroids_gdf, facilities_gdf, network_graph):
                 continue
 
             candidate_centroid_idxs = [centroid_idx_by_pos[pos] for pos in candidate_positions]
-            target_nodes = {
-                centroid_mapping[idx]
-                for idx in candidate_centroid_idxs
-                if idx in centroid_mapping
-            }
-
-            if not target_nodes:
+            candidate_csr_idxs = [
+                centroid_node_to_csridx[centroid_mapping[cidx]]
+                for cidx in candidate_centroid_idxs
+                if cidx in centroid_mapping and centroid_mapping[cidx] in centroid_node_to_csridx
+            ]
+            if not candidate_csr_idxs:
                 continue
 
-            reached, parents = _dijkstra_to_targets(network_graph, facility_node, target_nodes)
+            # scipy Dijkstra (single-source, full graph). NOTE: we intentionally do NOT
+            # pass `limit=search_radius_m` here — the original Python Dijkstra terminated
+            # once all candidate centroids were reached but did not cap distances, and
+            # network paths often exceed the Euclidean candidate radius. Capping would
+            # silently drop valid (facility, centroid) pairs and change allocation results.
+            dist_arr = csgraph_dijkstra(
+                csr, indices=fac_csr_idx, return_predecessors=False
+            )
 
-            if not reached:
+            cand_arr = np.asarray(candidate_csr_idxs, dtype=np.int64)
+            cand_dists = dist_arr[cand_arr]
+            mask = np.isfinite(cand_dists)
+            if not mask.any():
                 continue
 
-            for centroid_node, distance_m in reached.items():
-                centroid_idx = network_graph.nodes[centroid_node].get('centroid_idx')
+            for cidx_csr, dist_m in zip(cand_arr[mask], cand_dists[mask]):
+                centroid_idx = csridx_to_centroid_idx.get(int(cidx_csr))
                 if centroid_idx is None:
                     continue
-
-                path_nodes = _reconstruct_path(centroid_node, parents)
-                centroid_geom_wgs = centroids_gdf.loc[centroid_idx].geometry
-                meta = facility_meta[facility_idx]
-                euclidean_distance_km = ((centroid_geom_wgs.x - meta['lon']) ** 2 + (centroid_geom_wgs.y - meta['lat']) ** 2) ** 0.5 * 111.32
-
-                centroid_results[centroid_idx].append({
+                batch_results[centroid_idx].append({
                     'facility_idx': facility_idx,
-                    'distance_km': distance_m / 1000.0,
-                    'path_nodes': path_nodes,
+                    'distance_km': float(dist_m) / 1000.0,
+                    'path_nodes': [],
                     'path_segments': [],
-                    'total_segments': max(len(path_nodes) - 1, 0),
-                    'facility_type': meta['type'],
-                    'facility_capacity': meta['capacity'],
-                    'facility_lat': meta['lat'],
-                    'facility_lon': meta['lon'],
-                    'gem_id': meta['gem_id'],
-                    'euclidean_distance_km': euclidean_distance_km,
-                    'network_path': path_nodes
                 })
+
+        return batch_results
+
+    if len(facility_items) > 20 and num_centroids > 1000:
+        n_workers = min(MAX_WORKERS, len(facility_items))
+        print(f"  Using parallel processing for {len(facility_items)} facilities with {n_workers} workers...")
+        batch_size = max(1, len(facility_items) // n_workers)
+        facility_batches = [facility_items[i:i+batch_size] for i in range(0, len(facility_items), batch_size)]
+
+        with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(facility_batches))) as executor:
+            futures = [executor.submit(process_facility_batch, batch) for batch in facility_batches]
+            for i, future in enumerate(futures):
+                batch_result = future.result()
+                for centroid_idx, distances in batch_result.items():
+                    centroid_results[centroid_idx].extend(distances)
+
+                if (i + 1) % max(1, len(futures) // 10) == 0 or (i + 1) == len(futures):
+                    facilities_processed = min((i + 1) * batch_size, len(facility_items))
+                    print(f"    Processed {facilities_processed}/{len(facility_items)} facilities...")
+    else:
+        # Serial processing for small datasets (avoid threading overhead)
+        batch_result = process_facility_batch(facility_items)
+        for centroid_idx, distances in batch_result.items():
+            centroid_results[centroid_idx].extend(distances)
 
     results = []
     for centroid_idx in centroids_gdf.index:
@@ -2302,19 +2370,17 @@ def process_country_supply(country_iso3, output_dir="outputs_per_country", test_
                     facility_remaining, facility_supplied, demand_col, network_graph
                 )
             
-            # Update supply status for all centroids (keeping original loop for safety)
-            for centroid_idx in centroids_gdf.index:  # Use .index instead of iterrows
-                demand = float(centroids_gdf.loc[centroid_idx, demand_col] if pd.notna(centroids_gdf.loc[centroid_idx, demand_col]) else 0)
-                received = float(centroids_gdf.loc[centroid_idx, 'supply_received_mwh'] if pd.notna(centroids_gdf.loc[centroid_idx, 'supply_received_mwh']) else 0)
-                
-                if demand <= 0:
-                    centroids_gdf.loc[centroid_idx, 'supply_status'] = 'No Demand'
-                elif received >= demand:
-                    centroids_gdf.loc[centroid_idx, 'supply_status'] = 'Filled'
-                elif received > 0:
-                    centroids_gdf.loc[centroid_idx, 'supply_status'] = 'Partially Filled'
-                else:
-                    centroids_gdf.loc[centroid_idx, 'supply_status'] = 'Not Filled'
+            # Update supply status for all centroids (vectorized)
+            demand_arr = centroids_gdf[demand_col].fillna(0).to_numpy(dtype=np.float64)
+            received_arr = centroids_gdf['supply_received_mwh'].fillna(0).to_numpy(dtype=np.float64)
+            status_arr = np.where(
+                demand_arr <= 0, 'No Demand',
+                np.where(
+                    received_arr >= demand_arr, 'Filled',
+                    np.where(received_arr > 0, 'Partially Filled', 'Not Filled')
+                )
+            )
+            centroids_gdf['supply_status'] = status_arr
         else:
             # No grid infrastructure - use Euclidean allocation if we have facilities
             # Initialize variables needed for summary statistics
@@ -2589,6 +2655,18 @@ def allocate_supply_vectorized(centroids_gdf, facilities_gdf, centroid_facility_
     facility_capacities = []
     gem_col = 'GEM unit/phase ID' if 'GEM unit/phase ID' in facilities_gdf.columns else None
     type_col = 'Grouped_Type' if 'Grouped_Type' in facilities_gdf.columns else None
+
+    # Build facility_idx -> network node lookup once for path reconstruction later
+    facility_node_by_idx = {}
+    centroid_node_by_idx = {}
+    if network_graph is not None:
+        for node, ndata in network_graph.nodes(data=True):
+            ntype = ndata.get('type')
+            if ntype == 'facility':
+                facility_node_by_idx[ndata.get('facility_idx')] = node
+            elif ntype == 'pop_centroid':
+                centroid_node_by_idx[ndata.get('centroid_idx')] = node
+
     for idx, geom in zip(facilities_gdf.index, facilities_gdf.geometry):
         total_capacity = facility_remaining.get(idx, 0)
         if total_capacity > 0:
@@ -2682,17 +2760,32 @@ def allocate_supply_vectorized(centroids_gdf, facilities_gdf, centroid_facility_
                 'distance_km': distance_km,
                 'facility_type': facility_info['facility_type'],
                 'path_nodes': path_nodes,
-                'path_segments': path_segments
+                'path_segments': path_segments,
+                # Internal handles for deferred path reconstruction
+                '_facility_node': facility_node_by_idx.get(facility_idx),
+                '_centroid_node': centroid_node_by_idx.get(centroid_info['original_idx']),
             })
     
-    # Update original centroids_gdf with vectorized operations
-    # Map values back to original indices
-    for orig_idx, reset_idx in original_to_reset.items():
-        centroids_gdf.loc[orig_idx, 'supply_received_mwh'] = centroid_received[reset_idx]
-        centroids_gdf.loc[orig_idx, 'supplying_facility_distance'] = ', '.join(supplying_distances[reset_idx]) if supplying_distances[reset_idx] else ''
-        centroids_gdf.loc[orig_idx, 'supplying_facility_type'] = ', '.join(supplying_types[reset_idx]) if supplying_types[reset_idx] else ''
-        centroids_gdf.loc[orig_idx, 'supplying_facility_gem_id'] = ', '.join(supplying_gem_ids[reset_idx]) if supplying_gem_ids[reset_idx] else ''
-    
+    # Vectorized write-back to centroids_gdf (replaces per-row .loc assignments)
+    received_series = pd.Series(centroid_received, index=centroids_gdf_reset.index)
+    distance_series = pd.Series([', '.join(s) for s in supplying_distances], index=centroids_gdf_reset.index)
+    type_series = pd.Series([', '.join(s) for s in supplying_types], index=centroids_gdf_reset.index)
+    gem_series = pd.Series([', '.join(s) for s in supplying_gem_ids], index=centroids_gdf_reset.index)
+
+    # Map reset positions back to the original centroids_gdf index order
+    centroids_gdf['supply_received_mwh'] = received_series.values
+    centroids_gdf['supplying_facility_distance'] = distance_series.values
+    centroids_gdf['supplying_facility_type'] = type_series.values
+    centroids_gdf['supplying_facility_gem_id'] = gem_series.values
+
+    # Reconstruct paths for active connections only (one scipy Dijkstra per supplying facility)
+    if network_graph is not None and active_connections:
+        _reconstruct_paths_for_active_connections(active_connections, network_graph)
+        # Strip internal handles to keep downstream output clean
+        for conn in active_connections:
+            conn.pop('_facility_node', None)
+            conn.pop('_centroid_node', None)
+
     return centroids_gdf, active_connections
 
 def main():

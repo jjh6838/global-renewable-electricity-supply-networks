@@ -14,7 +14,7 @@ set -euo pipefail
 cd "$SLURM_SUBMIT_DIR"
 
 echo "[INFO] Starting parallel script 6/40 (T2) at $(date)"
-echo "[INFO] Processing 1 countries in this batch: USA"
+echo "[INFO] Processing 1 countries in this batch: RUS"
 echo "[INFO] Tier: T2 | Memory: 95G | CPUs: 40 | Time: 168:00:00"
 
 # --- directories ---
@@ -45,18 +45,18 @@ fi
 
 # Process countries in this batch
 
-echo "[INFO] Processing USA (T2)..."
+echo "[INFO] Processing RUS (T2)..."
 MAX_RETRIES=3
 for ATTEMPT in $(seq 1 $MAX_RETRIES); do
-    if $PY process_country_supply.py USA $SCENARIO_FLAG --output-dir outputs_per_country; then
-        echo "[SUCCESS] USA completed (attempt $ATTEMPT)"
+    if $PY process_country_supply.py RUS $SCENARIO_FLAG --output-dir outputs_per_country; then
+        echo "[SUCCESS] RUS completed (attempt $ATTEMPT)"
         break
     else
         if [ "$ATTEMPT" -lt "$MAX_RETRIES" ]; then
-            echo "[WARN] USA failed on attempt $ATTEMPT/$MAX_RETRIES - retrying in 10s..."
+            echo "[WARN] RUS failed on attempt $ATTEMPT/$MAX_RETRIES - retrying in 10s..."
             sleep 10
         else
-            echo "[ERROR] USA failed after $MAX_RETRIES attempts"
+            echo "[ERROR] RUS failed after $MAX_RETRIES attempts"
         fi
     fi
 done

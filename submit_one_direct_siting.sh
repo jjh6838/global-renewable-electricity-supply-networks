@@ -18,18 +18,6 @@ SBATCH_EXPORT=""
 ISO3=""
 TIER=""
 
-# Resolve analysis year from config.py so log paths follow 2024/2030/2050 settings.
-ANALYSIS_YEAR=$(python - <<'PY'
-from config import ANALYSIS_YEAR
-print(ANALYSIS_YEAR)
-PY
-)
-
-if [ -z "$ANALYSIS_YEAR" ]; then
-    ANALYSIS_YEAR="2030"
-    echo "[WARN] Could not resolve ANALYSIS_YEAR from config.py; defaulting to ${ANALYSIS_YEAR}"
-fi
-
 while [ $# -gt 0 ]; do
     case $1 in
         --run-all-scenarios)
@@ -81,8 +69,8 @@ if [ -z "$ISO3" ]; then
     echo "  $0 CHN --tier 1             # Use Tier 1 resources (95G memory)"
     echo ""
     echo "Tier resources (siting analysis):"
-    echo "  T1: 95G, 56 CPUs, 12:00:00 (Short)  - CHN, USA, IND"
-    echo "  T2: 95G, 40 CPUs, 12:00:00 (Short)  - CAN, MEX, RUS, BRA, etc."
+    echo "  T1: 25G, 40 CPUs, 12:00:00 (Short)  - CHN, USA, IND"
+    echo "  T2: 25G, 40 CPUs, 12:00:00 (Short)  - CAN, MEX, RUS, BRA, etc."
     echo "  T3: 25G, 40 CPUs, 12:00:00 (Short)  - All others (default)"
     exit 1
 fi
@@ -91,8 +79,8 @@ fi
 ISO3=$(echo "$ISO3" | tr '[:lower:]' '[:upper:]')
 
 # --- Auto-detect tier based on country if not specified ---
-SITING_TIER_1="USA IND CHN"
-SITING_TIER_2="CAN RUS IDN MEX SAU AUS KAZ BRA ARG"
+SITING_TIER_1="CHN IND USA"
+SITING_TIER_2="SAU MEX CAN KAZ RUS AUS ARG IDN BRA"
 
 if [ -z "$TIER" ]; then
     if [[ " $SITING_TIER_1 " =~ " $ISO3 " ]]; then
@@ -110,13 +98,13 @@ case $TIER in
     1)
         PARTITION="Short"
         TIME="12:00:00"
-        MEM="95G"
-        CPUS="56"
+        MEM="25G"
+        CPUS="40"
         ;;
     2)
         PARTITION="Short"
         TIME="12:00:00"
-        MEM="95G"
+        MEM="25G"
         CPUS="40"
         ;;
     3|*)
@@ -128,6 +116,13 @@ case $TIER in
 esac
 
 echo "[INFO] Resources: Partition=$PARTITION, Time=$TIME, Memory=$MEM, CPUs=$CPUS"
+
+# Resolve model year from config.py (override with ANALYSIS_YEAR env var if set)
+ANALYSIS_YEAR="${ANALYSIS_YEAR:-$(python - <<'PY'
+from config import ANALYSIS_YEAR
+print(ANALYSIS_YEAR)
+PY
+)}"
 
 # --- Determine scenario flag and log directory ---
 if [ -n "$SUPPLY_FACTOR" ]; then

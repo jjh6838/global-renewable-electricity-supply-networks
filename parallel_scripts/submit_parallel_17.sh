@@ -6,7 +6,6 @@
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=40
-#SBATCH --exclude=ouce-cn62
 #SBATCH --output=outputs_per_country/logs/parallel_17_%j.out
 #SBATCH --error=outputs_per_country/logs/parallel_17_%j.err
 #SBATCH --mail-type=END,FAIL

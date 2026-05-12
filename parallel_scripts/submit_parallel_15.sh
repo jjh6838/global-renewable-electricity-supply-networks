@@ -1,12 +1,11 @@
 #!/bin/bash --login
 #SBATCH --job-name=p15_t3
-#SBATCH --partition=Long
-#SBATCH --time=168:00:00
+#SBATCH --partition=Medium
+#SBATCH --time=48:00:00
 #SBATCH --mem=95G
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=40
-#SBATCH --exclude=ouce-cn62
 #SBATCH --output=outputs_per_country/logs/parallel_15_%j.out
 #SBATCH --error=outputs_per_country/logs/parallel_15_%j.err
 #SBATCH --mail-type=END,FAIL
@@ -15,7 +14,7 @@ set -euo pipefail
 cd "$SLURM_SUBMIT_DIR"
 
 echo "[INFO] Starting parallel script 15/40 (T3) at $(date)"
-echo "[INFO] Processing 1 countries in this batch: RUS"
+echo "[INFO] Processing 1 countries in this batch: MEX"
 echo "[INFO] Tier: T3 | Memory: 95G | CPUs: 40 | Time: 48:00:00"
 
 # --- directories ---
@@ -46,18 +45,18 @@ fi
 
 # Process countries in this batch
 
-echo "[INFO] Processing RUS (T3)..."
+echo "[INFO] Processing MEX (T3)..."
 MAX_RETRIES=3
 for ATTEMPT in $(seq 1 $MAX_RETRIES); do
-    if $PY process_country_supply.py RUS $SCENARIO_FLAG --output-dir outputs_per_country; then
-        echo "[SUCCESS] RUS completed (attempt $ATTEMPT)"
+    if $PY process_country_supply.py MEX $SCENARIO_FLAG --output-dir outputs_per_country; then
+        echo "[SUCCESS] MEX completed (attempt $ATTEMPT)"
         break
     else
         if [ "$ATTEMPT" -lt "$MAX_RETRIES" ]; then
-            echo "[WARN] RUS failed on attempt $ATTEMPT/$MAX_RETRIES - retrying in 10s..."
+            echo "[WARN] MEX failed on attempt $ATTEMPT/$MAX_RETRIES - retrying in 10s..."
             sleep 10
         else
-            echo "[ERROR] RUS failed after $MAX_RETRIES attempts"
+            echo "[ERROR] MEX failed after $MAX_RETRIES attempts"
         fi
     fi
 done
