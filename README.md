@@ -763,12 +763,15 @@ chmod +x submit_*.sh parallel_scripts/*.sh parallel_scripts_siting/*.sh
 | `parallel_scripts/*.sh` | 40 individual supply SLURM scripts |
 | `parallel_scripts_siting/*.sh` | Generated individual siting SLURM scripts |
 
-**Scenario Flags (all wrapper scripts support these):**
+**Scenario Flags:**
 | Flag | Description |
 |------|-------------|
 | (none) | Run single scenario (100% supply factor) |
+| `--run-all-years` | Run model years 2024, 2030, 2050 in one command (supported by `submit_all_parallel.sh` and `submit_all_parallel_siting.sh`) |
 | `--run-all-scenarios` | Run all 5 scenarios (100%, 90%, 80%, 70%, 60%) |
 | `--supply-factor 0.9` | Run single specific supply factor (e.g., 90%) |
+
+Note: `--run-all-years` applies to the master all-country submitters (`submit_all_parallel.sh`, `submit_all_parallel_siting.sh`), not the single-country direct submitters.
 
 ---
 
