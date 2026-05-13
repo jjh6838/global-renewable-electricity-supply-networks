@@ -90,8 +90,16 @@ source /soge-home/users/lina4376/miniconda3/etc/profile.d/conda.sh
 
 conda activate p1_etl
 
+# Bigdata path controls propagated to all sbatch jobs via --export=ALL
+export BIGDATA_ROOT="/soge-home/projects/mistral/ji"
+export BIGDATA_LOCAL_ROOT="$PWD"
+export BIGDATA_RETRY_COUNT="10"
+export BIGDATA_RETRY_SLEEP_SEC="5"
+
 echo "[INFO] Submitting 25 parallel siting analysis jobs..."
 echo "[INFO] SLURM will automatically queue and manage job execution"
+echo "[INFO] BIGDATA_ROOT=${BIGDATA_ROOT}"
+echo "[INFO] BIGDATA_RETRY_COUNT=${BIGDATA_RETRY_COUNT}, BIGDATA_RETRY_SLEEP_SEC=${BIGDATA_RETRY_SLEEP_SEC}"
 if [ -n "$RUN_ALL_SCENARIOS" ]; then
     echo "[INFO] Each job will run 5 scenarios (100%, 90%, 80%, 70%, 60%)"
 fi

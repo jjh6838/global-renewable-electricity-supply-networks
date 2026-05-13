@@ -520,8 +520,16 @@ source /soge-home/users/lina4376/miniconda3/etc/profile.d/conda.sh
 
 conda activate p1_etl
 
+# Bigdata path controls propagated to all sbatch jobs via --export=ALL
+export BIGDATA_ROOT="/soge-home/projects/mistral/ji"
+export BIGDATA_LOCAL_ROOT="$SCRIPT_DIR"
+export BIGDATA_RETRY_COUNT="10"
+export BIGDATA_RETRY_SLEEP_SEC="5"
+
 echo "[INFO] Submitting {len(all_batches)} parallel jobs..."
 echo "[INFO] SLURM will automatically queue and manage job execution (max 8 running at once)"
+echo "[INFO] BIGDATA_ROOT=${{BIGDATA_ROOT}}"
+echo "[INFO] BIGDATA_RETRY_COUNT=${{BIGDATA_RETRY_COUNT}}, BIGDATA_RETRY_SLEEP_SEC=${{BIGDATA_RETRY_SLEEP_SEC}}"
 if [ -n "$RUN_ALL_SCENARIOS" ]; then
     echo "[INFO] Each job will run 5 scenarios (100%, 90%, 80%, 70%, 60%)"
 fi
@@ -764,21 +772,22 @@ from config import ANALYSIS_YEAR
 print(ANALYSIS_YEAR)
 PY
 )}}"
+echo "[INFO] Analysis year: ${{ANALYSIS_YEAR}}"
 
 # --- Determine scenario flag and log directory ---
 if [ -n "$SUPPLY_FACTOR" ]; then
     SCENARIO_PCT=$(echo "$SUPPLY_FACTOR * 100" | bc | cut -d. -f1)
     LOG_DIR="outputs_per_country/parquet/${{ANALYSIS_YEAR}}_supply_${{SCENARIO_PCT}}%/logs"
     SCENARIO_DESC="supply factor ${{SCENARIO_PCT}}%"
-    SBATCH_EXPORT="--export=ALL,SUPPLY_FACTOR=$SUPPLY_FACTOR"
+    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR,SUPPLY_FACTOR=$SUPPLY_FACTOR"
 elif [ -n "$RUN_ALL_SCENARIOS" ]; then
     LOG_DIR="outputs_per_country/parquet/logs_run_all_scenarios"
     SCENARIO_DESC="ALL scenarios (100%, 90%, 80%, 70%, 60%)"
-    SBATCH_EXPORT="--export=ALL,RUN_ALL_SCENARIOS=1"
+    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR,RUN_ALL_SCENARIOS=1"
 else
     LOG_DIR="outputs_per_country/parquet/${{ANALYSIS_YEAR}}_supply_100%/logs"
     SCENARIO_DESC="100% (default)"
-    SBATCH_EXPORT=""
+    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR"
 fi
 
 mkdir -p "$LOG_DIR"
@@ -849,7 +858,7 @@ HEREDOC_BODY
 
 # --- Submit the job ---
 echo "[INFO] Submitting ${{ISO3}}..."
-sbatch --job-name="d_${{ISO3}}" \\
+sbatch --job-name="d_${{ISO3}}_${{ANALYSIS_YEAR}}" \
        --partition="$PARTITION" \\
        --exclude=ouce-cn62 \\
        --time="$TIME" \\
@@ -1238,8 +1247,16 @@ source /soge-home/users/lina4376/miniconda3/etc/profile.d/conda.sh
 
 conda activate p1_etl
 
+# Bigdata path controls propagated to all sbatch jobs via --export=ALL
+export BIGDATA_ROOT="/soge-home/projects/mistral/ji"
+export BIGDATA_LOCAL_ROOT="$PWD"
+export BIGDATA_RETRY_COUNT="10"
+export BIGDATA_RETRY_SLEEP_SEC="5"
+
 echo "[INFO] Submitting {len(all_batches)} parallel siting analysis jobs..."
 echo "[INFO] SLURM will automatically queue and manage job execution"
+echo "[INFO] BIGDATA_ROOT=${{BIGDATA_ROOT}}"
+echo "[INFO] BIGDATA_RETRY_COUNT=${{BIGDATA_RETRY_COUNT}}, BIGDATA_RETRY_SLEEP_SEC=${{BIGDATA_RETRY_SLEEP_SEC}}"
 if [ -n "$RUN_ALL_SCENARIOS" ]; then
     echo "[INFO] Each job will run 5 scenarios (100%, 90%, 80%, 70%, 60%)"
 fi
@@ -1402,21 +1419,22 @@ from config import ANALYSIS_YEAR
 print(ANALYSIS_YEAR)
 PY
 )}}"
+echo "[INFO] Analysis year: ${{ANALYSIS_YEAR}}"
 
 # --- Determine scenario flag and log directory ---
 if [ -n "$SUPPLY_FACTOR" ]; then
     SCENARIO_PCT=$(echo "$SUPPLY_FACTOR * 100" | bc | cut -d. -f1)
     LOG_DIR="outputs_per_country/parquet/${{ANALYSIS_YEAR}}_supply_${{SCENARIO_PCT}}%/logs"
     SCENARIO_DESC="supply factor ${{SCENARIO_PCT}}%"
-    SBATCH_EXPORT="--export=ALL,SUPPLY_FACTOR=$SUPPLY_FACTOR"
+    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR,SUPPLY_FACTOR=$SUPPLY_FACTOR"
 elif [ -n "$RUN_ALL_SCENARIOS" ]; then
     LOG_DIR="outputs_per_country/parquet/logs_run_all_scenarios"
     SCENARIO_DESC="ALL scenarios (100%, 90%, 80%, 70%, 60%)"
-    SBATCH_EXPORT="--export=ALL,RUN_ALL_SCENARIOS=1"
+    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR,RUN_ALL_SCENARIOS=1"
 else
     LOG_DIR="outputs_per_country/parquet/${{ANALYSIS_YEAR}}_supply_100%/logs"
     SCENARIO_DESC="100% (default)"
-    SBATCH_EXPORT=""
+    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR"
 fi
 
 mkdir -p "$LOG_DIR"
@@ -1487,7 +1505,7 @@ HEREDOC_BODY
 
 # --- Submit the job ---
 echo "[INFO] Submitting siting analysis for ${{ISO3}}..."
-sbatch --job-name="ds_${{ISO3}}" \\
+sbatch --job-name="ds_${{ISO3}}_${{ANALYSIS_YEAR}}" \
        --partition="$PARTITION" \\
        --exclude=ouce-cn62 \\
        --time="$TIME" \\

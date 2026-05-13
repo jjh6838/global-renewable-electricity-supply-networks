@@ -20,20 +20,34 @@ import time
 
 def get_bigdata_path(folder_name):
     """
-    Get the correct path for bigdata folders.
-    On SLURM jobs, prefers the shared cluster path to avoid local empty-folder masking.
-    Otherwise checks local path first, then cluster fallback.
-    Includes retry logic to handle transient NFS mount delays on compute nodes.
+    Resolve a bigdata folder path across local and cluster environments.
+
+    Behavior:
+    - On SLURM jobs, prefer shared cluster storage and retry for transient NFS delays.
+    - On non-SLURM runs, prefer local workspace data then cluster fallback.
+    - If nothing is available on SLURM, fail fast with a clear error instead of silently
+      returning a missing local relative path.
+
+    Environment overrides:
+    - BIGDATA_ROOT: cluster bigdata root (default: /soge-home/projects/mistral/ji)
+    - BIGDATA_LOCAL_ROOT: optional local root containing bigdata_* folders
+    - BIGDATA_RETRY_COUNT: retries on SLURM (default: 6)
+    - BIGDATA_RETRY_SLEEP_SEC: sleep between retries (default: 3)
 
     Args:
         folder_name: Name of the bigdata folder (e.g., 'bigdata_gadm')
 
     Returns:
-        str: Path to the folder
+        str: Existing path to the requested folder
     """
-    local_path = folder_name
-    cluster_path = f"/soge-home/projects/mistral/ji/{folder_name}" #This is configurable based on your cluster setup
+    cluster_root = os.environ.get("BIGDATA_ROOT", "/soge-home/projects/mistral/ji")
+    local_root = os.environ.get("BIGDATA_LOCAL_ROOT", "").strip()
+    local_path = os.path.join(local_root, folder_name) if local_root else folder_name
+    cluster_path = os.path.join(cluster_root, folder_name)
+
     running_on_slurm = os.environ.get("SLURM_JOB_ID") is not None
+    retry_count = max(1, int(os.environ.get("BIGDATA_RETRY_COUNT", "6")))
+    retry_sleep_sec = max(1, int(os.environ.get("BIGDATA_RETRY_SLEEP_SEC", "3")))
 
     def folder_has_data(path):
         if not os.path.isdir(path):
@@ -41,23 +55,40 @@ def get_bigdata_path(folder_name):
         with os.scandir(path) as it:
             return any(True for _ in it)
 
-    # On HPC jobs, prefer shared cluster storage with retry for transient NFS issues.
     if running_on_slurm:
-        for attempt in range(3):
+        # On compute nodes, always prioritize shared storage and retry for mount delays.
+        for attempt in range(retry_count):
             if folder_has_data(cluster_path):
                 return cluster_path
-            if attempt < 2:
-                time.sleep(2)
-        # All retries failed — warn loudly before falling through
-        print(f"[WARNING] get_bigdata_path: cluster path '{cluster_path}' not accessible "
-              f"after 3 attempts (SLURM_JOB_ID={os.environ.get('SLURM_JOB_ID')})")
+            if attempt < retry_count - 1:
+                time.sleep(retry_sleep_sec)
+
+        # Only use local fallback if it genuinely exists and has data.
+        if folder_has_data(local_path):
+            print(
+                f"[WARNING] get_bigdata_path: using local fallback '{local_path}' "
+                f"because cluster path '{cluster_path}' was unavailable "
+                f"(SLURM_JOB_ID={os.environ.get('SLURM_JOB_ID')})"
+            )
+            return local_path
+
+        raise FileNotFoundError(
+            "get_bigdata_path failed on SLURM: no accessible data folder found. "
+            f"Checked cluster path '{cluster_path}' for {retry_count} attempts "
+            f"(sleep {retry_sleep_sec}s), then local fallback '{local_path}'. "
+            "Set BIGDATA_ROOT/BIGDATA_LOCAL_ROOT correctly or fix cluster mounts/symlinks."
+        )
+
+    # Non-SLURM behavior: local first for developer convenience, then cluster.
     if folder_has_data(local_path):
         return local_path
     if folder_has_data(cluster_path):
         return cluster_path
-    # Return local path as default (will trigger appropriate error if needed)
-    print(f"[WARNING] get_bigdata_path: no data found for '{folder_name}' in any location")
-    return local_path
+
+    raise FileNotFoundError(
+        f"get_bigdata_path: no data found for '{folder_name}'. "
+        f"Checked local '{local_path}' and cluster '{cluster_path}'."
+    )
 
 # =============================================================================
 # COMMON SETTINGS

@@ -80,7 +80,7 @@ ISO3=$(echo "$ISO3" | tr '[:lower:]' '[:upper:]')
 
 # --- Auto-detect tier based on country if not specified ---
 SITING_TIER_1="CHN USA IND"
-SITING_TIER_2="IDN AUS BRA MEX CAN SAU RUS KAZ ARG"
+SITING_TIER_2="BRA IDN CAN RUS AUS ARG KAZ MEX SAU"
 
 if [ -z "$TIER" ]; then
     if [[ " $SITING_TIER_1 " =~ " $ISO3 " ]]; then
@@ -123,21 +123,22 @@ from config import ANALYSIS_YEAR
 print(ANALYSIS_YEAR)
 PY
 )}"
+echo "[INFO] Analysis year: ${ANALYSIS_YEAR}"
 
 # --- Determine scenario flag and log directory ---
 if [ -n "$SUPPLY_FACTOR" ]; then
     SCENARIO_PCT=$(echo "$SUPPLY_FACTOR * 100" | bc | cut -d. -f1)
     LOG_DIR="outputs_per_country/parquet/${ANALYSIS_YEAR}_supply_${SCENARIO_PCT}%/logs"
     SCENARIO_DESC="supply factor ${SCENARIO_PCT}%"
-    SBATCH_EXPORT="--export=ALL,SUPPLY_FACTOR=$SUPPLY_FACTOR"
+    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR,SUPPLY_FACTOR=$SUPPLY_FACTOR"
 elif [ -n "$RUN_ALL_SCENARIOS" ]; then
     LOG_DIR="outputs_per_country/parquet/logs_run_all_scenarios"
     SCENARIO_DESC="ALL scenarios (100%, 90%, 80%, 70%, 60%)"
-    SBATCH_EXPORT="--export=ALL,RUN_ALL_SCENARIOS=1"
+    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR,RUN_ALL_SCENARIOS=1"
 else
     LOG_DIR="outputs_per_country/parquet/${ANALYSIS_YEAR}_supply_100%/logs"
     SCENARIO_DESC="100% (default)"
-    SBATCH_EXPORT=""
+    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR"
 fi
 
 mkdir -p "$LOG_DIR"
@@ -208,8 +209,7 @@ HEREDOC_BODY
 
 # --- Submit the job ---
 echo "[INFO] Submitting siting analysis for ${ISO3}..."
-sbatch --job-name="ds_${ISO3}" \
-       --partition="$PARTITION" \
+sbatch --job-name="ds_${ISO3}_${ANALYSIS_YEAR}"        --partition="$PARTITION" \
        --exclude=ouce-cn62 \
        --time="$TIME" \
        --mem="$MEM" \
