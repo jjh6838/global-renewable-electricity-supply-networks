@@ -5,9 +5,9 @@ Python workflow accompanying a paper of the same title. The workflow provides a 
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-![Republic of Korea — 2050 renewable supply and network (add_v2). Red lines: modelled new transmission/distribution; grey lines: existing grid (Gridfinder); grey points: settlement centroids. Generated from the four archived per-country Parquet layers; see figure_scripts/p1_z_preview_map.py.](sample_maps/preview_KOR_2050.png)
+![Republic of Korea — 2050 renewable supply and network (add_v2). Coloured points: generation facilities by technology; red lines: modelled new transmission/distribution; light grey lines: existing grid (Gridfinder); dark grey points: settlement centroids. Rendered directly from the four archived per-country Parquet layers.](sample_maps/preview_KOR_2050.png)
 
-*Sample country preview — Republic of Korea, 2050, supply 100% (`_add_v2` final reallocation). Reproduce with `python figure_scripts/p1_z_preview_map.py`.*
+*Sample country preview — Republic of Korea, 2050, supply 100% (`_add_v2` final reallocation).*
 
 ## Table of Contents
 
@@ -87,6 +87,7 @@ High-level structure and what each area is used for:
 ├── submit_workflow.sh
 ├── bigdata_*/
 ├── data_*/
+├── sample_maps/
 ├── outputs_per_country/
 ├── outputs_global/
 ├── outputs_processed_data/
@@ -675,23 +676,19 @@ The config resolver prefers cluster storage on SLURM jobs and local data for int
 
 ## Sample Maps
 
-The `sample_maps/` folder contains country-level PNG previews generated directly from the four archived per-country Parquet layers (`facilities`, `centroids`, `polylines`, `grid_lines`). Each preview shows generation facilities coloured by `Grouped_Type` (Solar, Wind, Hydro, Nuclear, Fossil, Other Renewables), modelled new transmission/distribution lines (red), the existing Gridfinder grid (light grey), and settlement centroids (dark grey), in the archived native CRS (EPSG:4326) with latitude-aware aspect correction.
+The `sample_maps/` folder contains country-level PNG previews rendered directly from the four archived per-country Parquet layers (`facilities`, `centroids`, `polylines`, `grid_lines`). Each preview shows generation facilities coloured by `Grouped_Type` (Solar, Wind, Hydro, Nuclear, Fossil, Other Renewables), modelled new transmission/distribution lines (red), the existing Gridfinder grid (light grey), and settlement centroids (dark grey), in the archived native CRS (EPSG:4326) with latitude-aware aspect correction.
 
-The sample preview shown at the top of this README is `sample_maps/preview_KOR_2050.png` (Republic of Korea, 2050, supply 100% with `_add_v2` final reallocation). Additional country examples already produced include Italy (`ITA`), Côte d'Ivoire (`CIV`), Panama (`PAN`), and Vietnam (`VNM`).
+The preview shown at the top of this README is `sample_maps/preview_KOR_2050.png` (Republic of Korea, 2050, supply 100% with `_add_v2` final reallocation). Additional country examples included in `sample_maps/` are Italy (`ITA`), Côte d'Ivoire (`CIV`), Panama (`PAN`), and Vietnam (`VNM`).
 
-**Reproduce or generate a new preview** with [figure_scripts/p1_z_preview_map.py](figure_scripts/p1_z_preview_map.py):
+These PNGs are provided as illustrative previews of the dataset; equivalent maps for any country, year, or scenario can be produced from the archived Parquet layers in any GIS-aware environment (e.g. QGIS, ArcGIS, or `geopandas` + `matplotlib`). For convenience, the small helper script used to generate the included previews is bundled in [sample_maps/generate_preview_map.py](sample_maps/generate_preview_map.py) and can be run from the project root once the per-country Parquet outputs are in place:
 
 ```bash
-# Default: Republic of Korea, 2050, supply 100%, _add_v2
-python figure_scripts/p1_z_preview_map.py
-
-# Any other country / year / scenario
-python figure_scripts/p1_z_preview_map.py --iso3 GBR
-python figure_scripts/p1_z_preview_map.py --iso3 TLS --year 2050
-python figure_scripts/p1_z_preview_map.py --iso3 USA --supply-pct 100 --no-add-v2
+python sample_maps/generate_preview_map.py --iso3 KOR
+python sample_maps/generate_preview_map.py --iso3 GBR --year 2050
+python sample_maps/generate_preview_map.py --iso3 USA --supply-pct 100 --no-add-v2
 ```
 
-The script requires that the corresponding scenario folder (e.g. `outputs_per_country/parquet/2050_supply_100%_add_v2/`) contains the four Parquet layers for the requested ISO3, and that the `p1_etl` environment is active (uses `geopandas`, `matplotlib`, and `pycountry`). Output is written to `sample_maps/preview_{ISO3}_{YEAR}.png`.
+The script reads `outputs_per_country/parquet/{YEAR}_supply_{PCT}%[_add_v2]/{layer}_{ISO3}[_add_v2].parquet`, requires `geopandas`, `matplotlib`, and `pycountry` from the `p1_etl` environment, and writes the output to `sample_maps/preview_{ISO3}_{YEAR}.png`.
 
 ## Troubleshooting
 
