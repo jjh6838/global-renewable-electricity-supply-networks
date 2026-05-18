@@ -18,6 +18,7 @@ dependencies:
   - xlsxwriter
   
   # Geospatial
+  - affine
   - geopandas>=1.0
   - fiona>=1.10
   - shapely>=2.0

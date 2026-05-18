@@ -1797,15 +1797,45 @@ def process_country_siting(country_iso3, output_dir="outputs_per_country"):
     
     try:
         admin_boundaries = load_admin_boundaries(country_iso3)
-        centroids_gdf = load_centroids(country_iso3, scenario_suffix, output_dir)
+        try:
+            centroids_gdf = load_centroids(country_iso3, scenario_suffix, output_dir)
+        except FileNotFoundError as e:
+            print(f"\nNo centroids file found — supply produced no data for {country_iso3}.")
+            print("Saving empty siting summary and marking as success.")
+            empty_gdf = gpd.GeoDataFrame(columns=['geometry'], geometry='geometry', crs="EPSG:4326")
+            empty_clusters = gpd.GeoDataFrame(
+                columns=['original_cluster_id', 'is_remote', 'remaining_mwh', 'Grouped_Type', 'geometry'],
+                geometry='geometry', crs="EPSG:4326"
+            )
+            empty_networks = gpd.GeoDataFrame(
+                columns=['distance_km', 'geometry'],
+                geometry='geometry', crs="EPSG:4326"
+            )
+            save_outputs(empty_gdf, empty_clusters, empty_networks, country_iso3, output_dir,
+                        has_grid=False, has_facilities=False)
+            return str(Path(output_dir) / "parquet" / scenario_suffix)
+
         grid_lines_gdf = load_grid_lines(country_iso3, scenario_suffix, output_dir)
         facilities_gdf = load_facilities(country_iso3, scenario_suffix, output_dir)
         
         settlements_gdf = filter_settlements(centroids_gdf)
         
         if len(settlements_gdf) == 0:
-            print("\nNo settlements to process!")
-            return None
+            print("\nNo settlements to process! All settlements are already filled.")
+            print("Saving empty siting summary and marking as success.")
+            empty_clusters = gpd.GeoDataFrame(
+                columns=['original_cluster_id', 'is_remote', 'remaining_mwh', 'Grouped_Type', 'geometry'],
+                geometry='geometry', crs="EPSG:4326"
+            )
+            empty_networks = gpd.GeoDataFrame(
+                columns=['distance_km', 'geometry'],
+                geometry='geometry', crs="EPSG:4326"
+            )
+            has_grid = not grid_lines_gdf.empty
+            has_facilities = not facilities_gdf.empty
+            save_outputs(settlements_gdf, empty_clusters, empty_networks, country_iso3, output_dir,
+                        has_grid=has_grid, has_facilities=has_facilities)
+            return str(Path(output_dir) / "parquet" / scenario_suffix)
         
         # Calculate clusters based on remaining capacity (capacity-driven approach)
         # Pass all centroids to correctly calculate total supply received (including filled settlements)
