@@ -32,3 +32,6 @@ outputs_arcgis/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Zenodo packaging artifacts
+zenodo_package/
