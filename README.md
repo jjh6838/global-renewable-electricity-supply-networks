@@ -1,6 +1,6 @@
-# Global Electricity Supply-Demand Analysis Framework
+# A global geospatial dataset of renewable electricity supply and network infrastructure for 2024, 2030 and 2050
 
-A comprehensive geospatial pipeline for country-level electricity supply-demand analysis, renewable siting, and climate-aware resource viability.
+Python workflow accompanying the Nature Scientific Data manuscript of the same title. The workflow provides a comprehensive geospatial pipeline for country-level electricity supply–demand analysis, renewable siting, and climate-aware resource viability across 189 countries and three model years (2024, 2030, 2050).
 
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -71,6 +71,7 @@ High-level structure and what each area is used for:
 ├── p1_f_viable_hydro.py
 ├── process_country_supply.py
 ├── process_country_siting.py
+├── process_completion.py
 ├── combine_one_results.py
 ├── combine_global_results.py
 ├── generate_hpc_scripts.py
@@ -79,17 +80,6 @@ High-level structure and what each area is used for:
 ├── submit_one_direct.sh
 ├── submit_one_direct_siting.sh
 ├── submit_workflow.sh
-├── figure_scripts/
-│   ├── p1_na_results_data_etl.py
-│   ├── p1_na_fig12.py
-│   ├── p1_na_fig34.py
-│   ├── p1_na_fig34_alt1.py
-│   ├── p1_na_fig56.py
-│   ├── p1_na_fig7.py
-│   ├── p1_na_fig8.py
-│   ├── p1_z_fig_validation1.py
-│   ├── p1_z_fig_validation2.py
-│   └── p1_z_fig_validation3.py
 ├── bigdata_*/
 ├── data_*/
 ├── outputs_per_country/
@@ -117,6 +107,8 @@ python -c "import geopandas, networkx, rasterio, affine; print('Environment OK')
 ```
 
 ## Quick Start
+
+> **Prerequisite:** All input datasets must already be staged locally before running any workflow command. Populate every `bigdata_*` and `data_*` folder listed in [Input Datasets](#input-datasets) using the sources in Table 1; small `data_*` files are distributed with the repository, while `bigdata_*` folders are user-supplied. Then create and activate the conda environment as shown in [Installation and Environment](#installation-and-environment).
 
 ### Local Single-Country End-to-End
 
@@ -239,6 +231,18 @@ python process_country_siting.py KEN --supply-factor 0.9
 
   ```bash
   python combine_global_results.py [--input-dir outputs_per_country] [--scenario SCENARIO] [--countries ISO3 ISO3 ...] [--countries-file countries.txt] [--output out.gpkg]
+  ```
+
+- process_completion.py *(post-run audit)*
+  - Audits per-country outputs after large multi-country runs and finalizes the working country set.
+  - Scans the standard scenario folders (e.g. `2024_supply_100%`, `2030_supply_100%_add_v2`, `2050_supply_100%_add_v2`) for the expected summary spreadsheets and parquet layers, identifies countries with missing or non-usable spatial results, and writes a CSV audit report (`process_completion_audit.csv`).
+  - Default behaviour is **dry-run**. Use `--apply` to remove incomplete country outputs and update `countries_list.txt` accordingly.
+
+  Usage:
+
+  ```bash
+  python process_completion.py                  # dry-run audit only
+  python process_completion.py --apply          # apply removals and refresh countries_list.txt
   ```
 
 ### HPC Script Generation and Submission
@@ -528,6 +532,9 @@ python combine_one_results.py KEN --scenario 2024_supply_100%
 ```bash
 python generate_hpc_scripts.py --create-parallel
 python generate_hpc_scripts.py --create-parallel-siting
+
+# Normalize line endings (CRLF -> LF) before granting execute bits on Linux HPC
+sed -i 's/\r$//' submit_*.sh parallel_scripts/*.sh parallel_scripts_siting/*.sh
 
 chmod +x submit_*.sh parallel_scripts/*.sh parallel_scripts_siting/*.sh
 
