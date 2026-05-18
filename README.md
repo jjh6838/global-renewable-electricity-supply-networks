@@ -1,6 +1,6 @@
 # A global geospatial dataset of renewable electricity supply and network infrastructure for 2024, 2030 and 2050
 
-Python workflow accompanying a paper of the same title. The workflow provides a comprehensive geospatial pipeline for country-level electricity supply–demand analysis, renewable siting, and climate-aware resource viability across 189 countries and three model years (2024, 2030, 2050).
+Python workflow accompanying a manuscript of the same title currently under submission to Scientific Data. The workflow provides a comprehensive geospatial pipeline for country-level electricity requirement and supply analysis, renewable siting, and climate-aware resource viability across 189 countries and three model years (2024, 2030, 2050).
 
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -30,13 +30,13 @@ Python workflow accompanying a paper of the same title. The workflow provides a 
 
 ## Overview
 
-This repository contains the Python workflow accompanying a paper that presents a global geospatial dataset of modelled renewable electricity supply and transmission-network infrastructure for **189 countries** and three model years (**2024, 2030, 2050**), at **300 arc-second resolution** (approximately 10 km at the equator). The workflow integrates observed electricity generation facilities, transmission-network proxies, national electricity-generation statistics, settlement-population data, renewable-resource baselines, and CMIP6 future-resource projections into 567 country-year runs.
+This repository contains the Python workflow accompanying a manuscript currently under submission to Scientific Data. The manuscript presents a global geospatial dataset of modelled renewable electricity supply and transmission-network infrastructure for **189 countries** and three model years (**2024, 2030, 2050**), at **300 arc-second resolution** (approximately 10 km at the equator). The workflow integrates observed electricity generation facilities, transmission-network proxies, national electricity-generation statistics, settlement-population data, renewable-resource baselines, and CMIP6 future-resource projections into 567 country-year runs.
 
 For each country and model year, the workflow produces four core archived layers — generation facilities, settlement-centroid electricity requirements and supply, modelled transmission-network paths, and a national summary table — plus global renewable viability screening layers for solar, wind, and hydropower in 2030 and 2050. The dataset is intended to support energy-access assessment, renewable electricity planning, infrastructure resilience analysis, and integration with local or national datasets.
 
 The workflow is scenario-aware and supports:
 
-- Population coverage factor analysis at 100%, 90%, 80%, 70%, 60% (configurable; published dataset uses 100%).
+- Population coverage factor analysis at 100%, 90%, 80%, 70%, 60% (configurable; this submission uses 100%).
 - Single custom factor via `--supply-factor`.
 - Multi-year submission mode (2024, 2030, 2050) in HPC wrapper scripts.
 - Optional second supply run that auto-detects siting outputs and writes `_add_v2` outputs (final post-siting reallocation).
@@ -56,7 +56,7 @@ The dataset is generated through a modular eight-stage workflow run separately f
 | (7) | Renewable electricity siting: additional facility records generated through requirement-weighted clustering and viability-layer matching. | `process_country_siting.py` |
 | (8) | Final network-based supply reallocation with additional facilities, producing the archived `_add_v2` outputs for 2030 and 2050. | `process_country_supply.py` (second pass) |
 
-For 2024, only stages (1)–(4) are applied; the published 2024 outputs do not use the `_add_v2` suffix because no additional renewable siting or final reallocation is performed.
+For 2024, only stages (1)-(4) are applied; the 2024 outputs in this submission do not use the `_add_v2` suffix because no additional renewable siting or final reallocation is performed.
 
 ## Project Structure
 
@@ -87,6 +87,7 @@ High-level structure and what each area is used for:
 ├── submit_workflow.sh
 ├── bigdata_*/
 ├── data_*/
+├── sample_data/
 ├── sample_maps/
 ├── outputs_per_country/
 ├── outputs_global/
@@ -191,7 +192,7 @@ python process_country_siting.py KEN --supply-factor 0.9
 ### Country Analysis
 
 - process_country_supply.py *(Stages 3, 4, 8)*
-  - Main country-level supply-demand network analysis.
+  - Main country-level electricity requirement and supply network analysis.
   - Supports single scenario, all scenarios, or one custom supply factor.
   - Auto-enables add_v2 workflow when matching siting workbook is detected.
 
@@ -319,9 +320,9 @@ All major runtime settings are in config.py.
 - VIABILITY_SEARCH_RADIUS_KM = 100.0
 - VIABILITY_FALLBACK_FOR_2024 = True
 
-### Manuscript-aligned defaults for the published dataset
+### Manuscript-aligned defaults for this submission
 
-The published dataset uses the broad-screening thresholds and parameters listed below. All are configurable via [config.py](config.py). Stage numbers refer to the [Workflow Summary](#workflow-summary).
+This submission uses the broad-screening thresholds and parameters listed below. All are configurable via [config.py](config.py). Stage numbers refer to the [Workflow Summary](#workflow-summary).
 
 - **Population coverage factor (stage 3):** 100% — share of the national electricity-use proxy spatially downscaled to populated settlement-centroids. Not an observed electrification rate.
 - **Network thresholds (stage 4):** 1 km for node snapping, component stitching, and facility/centroid attachment.
@@ -422,7 +423,21 @@ The loader scripts expect the following files. Adjust the loader paths in [confi
 
 ## Data Records
 
-The archived dataset is deposited at **[Zenodo DOI]** (placeholder — replaced on publication). Records are organized as standardized country-year outputs for 189 countries × 3 model years (2024, 2030, 2050). Each country-year output contains four core components: generation facility layers, settlement-centroid electricity requirement and supply layers, transmission-network layers with routed supply paths, and a country-level summary table. Global supporting renewable viability screening layers for solar, wind, and hydropower are also included for 2030 and 2050.
+The archived dataset for this submission is deposited at **[Zenodo DOI]** (placeholder - DOI updated upon publication). Records are organized as standardized country-year outputs for 189 countries x 3 model years (2024, 2030, 2050). Each country-year output contains four core components: generation facility layers, settlement-centroid electricity requirement and supply layers, transmission-network layers with routed supply paths, and a country-level summary table. Global supporting renewable viability screening layers for solar, wind, and hydropower are also included for 2030 and 2050.
+
+The full dataset is archived separately on Zenodo and is not stored in this GitHub repository because of file size and versioning considerations. This repository is intended for code, workflow scripts, and lightweight reproducible examples.
+
+### GitHub sample_data folder
+
+For quick testing and reviewer reproducibility, this repository includes a small example subset in `sample_data/`.
+
+Current example bundle:
+
+- `sample_data/2050_supply_100%_add_v2/2050_supply_100%_KOR_add_v2.xlsx`
+- `sample_data/2050_supply_100%_add_v2/facilities_KOR_add_v2.parquet`
+- `sample_data/2050_supply_100%_add_v2/centroids_KOR_add_v2.parquet`
+- `sample_data/2050_supply_100%_add_v2/polylines_KOR_add_v2.parquet`
+- `sample_data/2050_supply_100%_add_v2/grid_lines_KOR_add_v2.parquet`
 
 Geospatial vector layers are provided in **Parquet** (`.parquet`) format; country-level summaries in **Excel** (`.xlsx`) format. The renewable viability screening layers are provided as global supporting records for 2030 and 2050 only, with one Parquet and one GeoTIFF (`.tif`) file per technology (solar, wind, hydropower) — 12 global files total: 2 years × 2 formats × 3 technologies.
 
@@ -595,7 +610,7 @@ The canonical field schema for each archived layer is documented in [Data Record
 - outputs_per_country/parquet/{YEAR}_supply_{PCT}%/
 - outputs_per_country/parquet/{YEAR}_supply_{PCT}%_add_v2/
 
-The `_add_v2` suffix indicates that the final network-based supply reallocation in stage (8) has been completed. For 2024 outputs, the suffix is not used because the baseline year is built directly from the initial allocation in stage (4); no additional renewable siting is applied. Folders without `_add_v2` produced for 2030 or 2050 are intermediate outputs after stage (4) and are not part of the published archive unless retained.
+The `_add_v2` suffix indicates that the final network-based supply reallocation in stage (8) has been completed. For 2024 outputs, the suffix is not used because the baseline year is built directly from the initial allocation in stage (4); no additional renewable siting is applied. Folders without `_add_v2` produced for 2030 or 2050 are intermediate outputs after stage (4) and are not part of the submission archive unless retained.
 
 ### Typical Country Files
 
@@ -910,6 +925,6 @@ python p1_f_viable_hydro.py
 
 ## Citation and License
 
-- **Relevant paper:** DOI to be added on publication.
+- **Relevant manuscript:** Submitted to *Scientific Data*; DOI to be added upon publication.
 - Citation metadata: [CITATION.cff](CITATION.cff)
 - License: [LICENSE](LICENSE)
