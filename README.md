@@ -5,6 +5,10 @@ Python workflow accompanying a paper of the same title. The workflow provides a 
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+![Republic of Korea — 2050 renewable supply and network (add_v2). Red lines: modelled new transmission/distribution; grey lines: existing grid (Gridfinder); grey points: settlement centroids. Generated from the four archived per-country Parquet layers; see figure_scripts/p1_z_preview_map.py.](sample_maps/preview_KOR_2050.png)
+
+*Sample country preview — Republic of Korea, 2050, supply 100% (`_add_v2` final reallocation). Reproduce with `python figure_scripts/p1_z_preview_map.py`.*
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -18,6 +22,7 @@ Python workflow accompanying a paper of the same title. The workflow provides a 
 - [Configuration Guide](#configuration-guide)
 - [Workflow Examples](#workflow-examples)
 - [Outputs and Naming Conventions](#outputs-and-naming-conventions)
+- [Sample Maps](#sample-maps)
 - [HPC Guide](#hpc-guide)
 - [Troubleshooting](#troubleshooting)
 - [Annex A: Pre-Data Processing (p1_a to p1_f)](#annex-a-pre-data-processing-p1_a-to-p1_f)
@@ -667,6 +672,26 @@ When submitting in bulk, allocate the largest countries to higher-tier nodes via
 
 Wrappers export BIGDATA_ROOT, BIGDATA_LOCAL_ROOT, BIGDATA_RETRY_COUNT, and BIGDATA_RETRY_SLEEP_SEC.
 The config resolver prefers cluster storage on SLURM jobs and local data for interactive runs.
+
+## Sample Maps
+
+The `sample_maps/` folder contains country-level PNG previews generated directly from the four archived per-country Parquet layers (`facilities`, `centroids`, `polylines`, `grid_lines`). Each preview shows generation facilities coloured by `Grouped_Type` (Solar, Wind, Hydro, Nuclear, Fossil, Other Renewables), modelled new transmission/distribution lines (red), the existing Gridfinder grid (light grey), and settlement centroids (dark grey), in the archived native CRS (EPSG:4326) with latitude-aware aspect correction.
+
+The sample preview shown at the top of this README is `sample_maps/preview_KOR_2050.png` (Republic of Korea, 2050, supply 100% with `_add_v2` final reallocation). Additional country examples already produced include Italy (`ITA`), Côte d'Ivoire (`CIV`), Panama (`PAN`), and Vietnam (`VNM`).
+
+**Reproduce or generate a new preview** with [figure_scripts/p1_z_preview_map.py](figure_scripts/p1_z_preview_map.py):
+
+```bash
+# Default: Republic of Korea, 2050, supply 100%, _add_v2
+python figure_scripts/p1_z_preview_map.py
+
+# Any other country / year / scenario
+python figure_scripts/p1_z_preview_map.py --iso3 GBR
+python figure_scripts/p1_z_preview_map.py --iso3 TLS --year 2050
+python figure_scripts/p1_z_preview_map.py --iso3 USA --supply-pct 100 --no-add-v2
+```
+
+The script requires that the corresponding scenario folder (e.g. `outputs_per_country/parquet/2050_supply_100%_add_v2/`) contains the four Parquet layers for the requested ISO3, and that the `p1_etl` environment is active (uses `geopandas`, `matplotlib`, and `pycountry`). Output is written to `sample_maps/preview_{ISO3}_{YEAR}.png`.
 
 ## Troubleshooting
 
