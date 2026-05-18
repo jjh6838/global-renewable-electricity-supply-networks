@@ -5,7 +5,7 @@ message: >-
   use the associated dataset, please cite the Zenodo dataset record listed
   under `references`.
 type: software
-title: "Global Renewable Electricity Supply and Networks Workflow"
+title: "A global geospatial dataset of renewable electricity supply and network infrastructure for 2024, 2030 and 2050"
 version: 1.0.0
 url: "https://github.com/jjh6838/global-renewable-electricity-supply-networks"
 repository-code: "https://github.com/jjh6838/global-renewable-electricity-supply-networks"
@@ -23,7 +23,7 @@ authors:
 
 preferred-citation:
   type: software
-  title: "Source code for: A global geospatial dataset of renewable electricity supply, electricity requirements, and transmission networks"
+  title: "Source code for: A global geospatial dataset of renewable electricity supply and network infrastructure for 2024, 2030 and 2050"
   authors:
     - family-names: "Jeong"
       given-names: "Jihyeon"
@@ -43,7 +43,7 @@ preferred-citation:
 
 references:
   - type: data
-    title: "Global geospatial dataset of modelled renewable electricity supply, electricity requirements, and transmission networks"
+    title: "A global geospatial dataset of renewable electricity supply and network infrastructure for 2024, 2030 and 2050"
     authors:
       - family-names: "Jeong"
         given-names: "Jihyeon"
