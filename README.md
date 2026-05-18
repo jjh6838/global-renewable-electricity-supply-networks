@@ -8,40 +8,50 @@ A comprehensive geospatial pipeline for country-level electricity supply-demand 
 ## Table of Contents
 
 - [Overview](#overview)
-- [Current Workflow Model](#current-workflow-model)
+- [Workflow Summary](#workflow-summary)
+- [Input Datasets](#input-datasets)
+- [Data Records](#data-records)
 - [Project Structure](#project-structure)
 - [Installation and Environment](#installation-and-environment)
 - [Quick Start](#quick-start)
 - [Script Reference](#script-reference)
 - [Configuration Guide](#configuration-guide)
-- [Data Requirements](#data-requirements)
 - [Workflow Examples](#workflow-examples)
 - [Outputs and Naming Conventions](#outputs-and-naming-conventions)
 - [HPC Guide](#hpc-guide)
-- [Data Schema Reference](#data-schema-reference)
 - [Troubleshooting](#troubleshooting)
 - [Annex A: Pre-Data Processing (p1_a to p1_f)](#annex-a-pre-data-processing-p1_a-to-p1_f)
 - [Citation and License](#citation-and-license)
 
 ## Overview
 
-This repository supports end-to-end analysis of electricity systems and renewable expansion pathways by:
+This repository contains the Python workflow accompanying a Nature Scientific Data manuscript that presents a global geospatial dataset of modelled renewable electricity supply and transmission-network infrastructure for **189 countries** and three model years (**2024, 2030, 2050**), at **300 arc-second resolution** (approximately 10 km at the equator). The workflow integrates observed electricity generation facilities, transmission-network proxies, national electricity-generation statistics, settlement-population data, renewable-resource baselines, and CMIP6 future-resource projections into 567 country-year runs.
 
-1. Harmonizing national statistics and facility-level datasets.
-2. Projecting 2030 and 2050 scenarios using population and policy assumptions.
-3. Allocating demand spatially and connecting supply via network analysis.
-4. Identifying underserved settlements and siting additional infrastructure.
-5. Integrating climate-adjusted solar, wind, and hydro viability layers.
-6. Exporting country and global GIS-ready outputs.
-
-## Current Workflow Model
+For each country and model year, the workflow produces four core archived layers — generation facilities, settlement-centroid electricity requirements and supply, modelled transmission-network paths, and a national summary table — plus global renewable viability screening layers for solar, wind, and hydropower in 2030 and 2050. The dataset is intended to support energy-access assessment, renewable electricity planning, infrastructure resilience analysis, and integration with local or national datasets.
 
 The workflow is scenario-aware and supports:
 
-- Supply factor analysis at 100%, 90%, 80%, 70%, 60%.
-- Single custom supply factor via --supply-factor.
+- Population coverage factor analysis at 100%, 90%, 80%, 70%, 60% (configurable; published dataset uses 100%).
+- Single custom factor via `--supply-factor`.
 - Multi-year submission mode (2024, 2030, 2050) in HPC wrapper scripts.
-- Optional second supply run that auto-detects siting outputs and writes _add_v2 outputs.
+- Optional second supply run that auto-detects siting outputs and writes `_add_v2` outputs (final post-siting reallocation).
+
+## Workflow Summary
+
+The dataset is generated through a modular eight-stage workflow run separately for each country and model year. Stage numbers correspond to the Methods section of the accompanying manuscript.
+
+| Stage | Description | Implementing scripts |
+|------:|-------------|----------------------|
+| (1) | Input harmonization and preprocessing across the six input dataset categories (see [Input Datasets](#input-datasets)); harmonizes ISO3 codes, resamples rasters to 300 arc-second, prepares facility and network layers. | `p1_a_ember_gem_2024.py`, `p1_c_prep_landcover.py` |
+| (2) | Construction of national electricity-use proxies and technology-specific electricity-generation values for 2024, 2030, and 2050, using baseline statistics, NDC commitments, and IEA WEO Announced Pledges Scenario. | `p1_b_ember_2024_30_50.py` |
+| (3) | Spatial downscaling of national electricity-use proxies to populated settlement-centroids in proportion to population shares. | `process_country_supply.py` (downscaling step) |
+| (4) | Initial network-based supply allocation linking available generation facilities to settlement-centroids via GridFinder-derived transmission paths. | `process_country_supply.py` |
+| (5) | Estimation of residual electricity requirements and additional generation capacity needs by technology (2030 and 2050 only). | `process_country_siting.py` (residual logic) |
+| (6) | Technology-specific renewable viability screening for solar, wind, and hydropower using baseline + CMIP6-delta resource layers and land-cover filters. | `p1_d_viable_solar.py`, `p1_e_viable_wind.py`, `p1_f_viable_hydro.py` |
+| (7) | Renewable electricity siting: additional facility records generated through requirement-weighted clustering and viability-layer matching. | `process_country_siting.py` |
+| (8) | Final network-based supply reallocation with additional facilities, producing the archived `_add_v2` outputs for 2030 and 2050. | `process_country_supply.py` (second pass) |
+
+For 2024, only stages (1)–(4) are applied; the published 2024 outputs do not use the `_add_v2` suffix because no additional renewable siting or final reallocation is performed.
 
 ## Project Structure
 
@@ -149,32 +159,32 @@ python process_country_siting.py KEN --supply-factor 0.9
 
 ### Data Preparation and Projections
 
-- p1_a_ember_gem_2024.py
+- p1_a_ember_gem_2024.py *(Stage 1)*
   - Harmonizes Ember country aggregates with GEM facility-level records.
   - Produces country-level and facility-level baselines for downstream analysis.
   - Handles country code/name mapping and fuel-type harmonization.
 
-- p1_b_ember_2024_30_50.py
+- p1_b_ember_2024_30_50.py *(Stage 2)*
   - Builds 2030/2050 projections using UN population growth, NDC targets, and IEA assumptions.
   - Applies disaggregation logic to distribute broad renewable targets across technologies.
   - Exports projected generation/capacity tables for downstream country processing.
 
-- p1_c_prep_landcover.py
+- p1_c_prep_landcover.py *(Stage 1)*
   - Downloads ESA CCI Land Cover 2022 from CDS.
   - Converts and upscales to the 300 arcsec grid aligned with analysis outputs.
   - Produces landcover_2022_10arcsec.tif and landcover_2022_300arcsec.tif.
 
-- p1_d_viable_solar.py
+- p1_d_viable_solar.py *(Stage 6b)*
   - CMIP6 delta method for PVOUT projections.
   - Computes future PVOUT using baseline x climate delta and model ensemble mean.
   - Exports projected, uncertainty, delta, baseline, and viability-filtered outputs.
 
-- p1_e_viable_wind.py
+- p1_e_viable_wind.py *(Stage 6c)*
   - ERA5 + CMIP6 delta method for WPD projections.
   - Converts projected wind speeds to WPD and computes ensemble uncertainty.
   - Exports projected, uncertainty, delta, baseline, and viability-filtered outputs.
 
-- p1_f_viable_hydro.py
+- p1_f_viable_hydro.py *(Stage 6d)*
   - Unified hydro processing in three parts:
     - Runoff delta generation from ERA5-Land + CMIP6.
     - RiverATLAS discharge projection.
@@ -182,7 +192,7 @@ python process_country_siting.py KEN --supply-factor 0.9
 
 ### Country Analysis
 
-- process_country_supply.py
+- process_country_supply.py *(Stages 3, 4, 8)*
   - Main country-level supply-demand network analysis.
   - Supports single scenario, all scenarios, or one custom supply factor.
   - Auto-enables add_v2 workflow when matching siting workbook is detected.
@@ -198,7 +208,7 @@ python process_country_siting.py KEN --supply-factor 0.9
   - --supply-factor overrides --run-all-scenarios.
   - Valid supply-factor range is (0, 1].
 
-- process_country_siting.py
+- process_country_siting.py *(Stages 5, 7)*
   - Identifies underserved settlements and proposes siting clusters/networks.
   - Supports single scenario, all scenarios, or one custom supply factor.
 
@@ -307,6 +317,18 @@ All major runtime settings are in config.py.
 - VIABILITY_SEARCH_RADIUS_KM = 100.0
 - VIABILITY_FALLBACK_FOR_2024 = True
 
+### Manuscript-aligned defaults for the published dataset
+
+The published dataset uses the broad-screening thresholds and parameters listed below. All are configurable via [config.py](config.py). Stage numbers refer to the [Workflow Summary](#workflow-summary).
+
+- **Population coverage factor (stage 3):** 100% — share of the national electricity-use proxy spatially downscaled to populated settlement-centroids. Not an observed electrification rate.
+- **Network thresholds (stage 4):** 1 km for node snapping, component stitching, and facility/centroid attachment.
+- **Solar viability (stage 6b):** PVOUT ≥ 3.0 kWh/kWp/day; eligible ESA CCI land-cover classes 10, 20, 30, 40 (cropland), 130 (grassland), 150 (sparse vegetation), 200 (bare).
+- **Wind viability (stage 6c):** WPD ≥ 25 W/m² at 100 m (air density ρ = 1.225 kg/m³); same onshore land-cover classes as solar; offshore screening permitted within EEZ.
+- **Hydro viability (stage 6d):** discharge ≥ 1.0 m³/s; gradient ≥ 1.5 m/km; elevation ≥ 20 m; dry-to-mean monthly discharge ratio ≥ 0.2; Strahler stream order ≥ 2; land-cover exclusions: classes 190 (urban), 200 (bare), 220 (permanent snow/ice).
+- **Siting (stage 7):** viability search radius 300 km; requirement-weighted K-means clustering with component-aware splitting.
+- **CMIP6 ensemble (stages 6b–6d):** CESM2, EC-Earth3-Veg-LR, MPI-ESM1-2-LR under SSP2-4.5; delta method applied to baseline resource layers; ensemble mean used with inter-model range retained for validation.
+
 ### Regeneration Guidance
 
 If you change resolution or viability thresholds, re-run:
@@ -316,34 +338,172 @@ If you change resolution or viability thresholds, re-run:
 3. Country processing scripts.
 4. Combination scripts.
 
-## Data Requirements
+## Input Datasets
 
-### Core Spatial Inputs
+The workflow integrates six categories of input datasets. The GitHub repository provides the Python workflow together with selected small supporting data files (`data_*` folders). Large input datasets prefixed with `bigdata_` are **not** distributed through the repository and must be populated separately using datasets obtained from their original sources. If alternative file names or directory structures are used, the corresponding Python loading scripts should be updated accordingly.
 
-- bigdata_gadm/gadm_410-levels.gpkg
-- bigdata_eez/eez_v12.gpkg
-- bigdata_gridfinder/grid.gpkg
-- bigdata_settlements_jrc/GHS_POP_*.tif
-- bigdata_solar_pvout/PVOUT.tif
-- bigdata_wind_atlas/gasp_flsclassnowake_100m.tif
-- bigdata_hydro_atlas/RiverATLAS_Data_v10.gdb
-- bigdata_solar_wind_ms/solar_all_2024q2_v1.gpkg
-- bigdata_solar_wind_ms/wind_all_2024q2_v1.gpkg
+Table 1 below reproduces the manuscript input-dataset table.
 
-### Energy and Population Inputs
+### Table 1. Input datasets, workflow purpose, and local folder structure
 
-- data_energy_ember/yearly_full_release_long_format*.csv
-- data_energy_projections_iea/*
-- data_pop_un/WPP2024_TotalPopulationBySex*.csv
-- data_country_class_wb/*
+**Administrative and maritime boundaries**
 
-### CMIP6/ERA5 Working Directories
+| Dataset | Main purpose in workflow | Data type | Folder | Source |
+|---|---|---|---|---|
+| Administrative boundary data | Country clipping and attribution | Polygon | `bigdata_gadm` | GADM / Version 4.1 |
+| Maritime EEZ boundary data | Offshore support where relevant | Polygon | `bigdata_eez` | Flanders Marine Institute / Version 12 |
 
-- bigdata_solar_cmip6/downloads, extracted, outputs
-- bigdata_wind_cmip6/downloads, extracted, outputs
-- bigdata_hydro_cmip6/downloads, extracted, outputs
-- bigdata_hydro_era5_land/downloads
-- bigdata_landcover_cds/downloads, extracted, outputs
+**Population and national electricity-generation scenarios**
+
+| Dataset | Main purpose in workflow | Data type | Folder | Source |
+|---|---|---|---|---|
+| GHS-POP gridded settlement population data | Spatial downscaling of electricity requirements to settlement-centroids | Raster; Point | `bigdata_settlements_jrc` | JRC / 2025 modified version |
+| Population projection data | National population scaling for 2030 and 2050 | Table by country-year | `data_pop_un` | UN / Accessed in 2025 |
+| Country classification data | Benchmark assignment for countries without NDCs | Table by country | `data_country_class_wb` | World Bank / Accessed in 2025 |
+| Baseline national electricity-generation statistics | Baseline technology-specific electricity-generation values used to define the national electricity-use proxy and initial supply envelope | Table by country-year | `data_energy_ember` | IEA data compiled by Ember Energy / Accessed in 2025 |
+| Future electricity-generation scenarios | 2030 and 2050 scenario construction | Table by country-year | `data_energy_projections_iea` | IEA / 2024 modified version |
+| NDC renewable electricity commitments | Renewable electricity-generation inputs for 2030 scenario construction | Table by country-year | `data_energy_ember` | NDC data compiled by Ember Energy / Accessed in 2025 |
+
+**Electricity generation facility and transmission-network data**
+
+| Dataset | Main purpose in workflow | Data type | Folder | Source |
+|---|---|---|---|---|
+| Electricity generation facility data | Locations, status, installed capacity, and estimated generation of electricity generation facilities | Point | `data_facilities_gem` | GEM / Accessed in 2025 |
+| Electricity transmission-network data | Network routing between generation facilities and settlement-centroids | Polyline | `bigdata_gridfinder` | GridFinder / Updated with the 2024 data |
+
+**Land cover and renewable-site reference data**
+
+| Dataset | Main purpose in workflow | Data type | Folder | Source |
+|---|---|---|---|---|
+| Land cover data | Suitability filtering for renewable siting | Raster | `bigdata_landcover_cds` | CDS / 2025 modified version |
+| Existing renewable-site reference data | Auxiliary support for renewable-site screening | Point | `bigdata_solar_wind_ms` | Microsoft Global Renewables Watch / 2024 Q2 version |
+
+**Baseline renewable-resource data**
+
+| Dataset | Main purpose in workflow | Data type | Folder | Source |
+|---|---|---|---|---|
+| Solar — Photovoltaic Power Potential (PVOUT) data | Baseline solar productivity for viability screening | Raster | `bigdata_solar_pvout` | World Bank Global Solar Atlas / Accessed in 2025 |
+| Wind — ERA5 wind speed data | Baseline wind productivity and suitability screening | Raster | `bigdata_wind_atlas` | CDS / 2025 modified version |
+| Hydro — ERA5-Land runoff data | Baseline hydrological conditions for runoff adjustment | Raster | `bigdata_hydro_era5_land` | CDS / 2025 modified version |
+| Hydro — River network and attribute data | River-based hydropower screening | Polyline | `bigdata_hydro_atlas` | HydroATLAS / Accessed in 2025 |
+
+**Future renewable-resource projections**
+
+| Dataset | Main purpose in workflow | Data type | Folder | Source |
+|---|---|---|---|---|
+| Solar — CMIP6 solar-resource projections | Future solar viability screening | Raster | `bigdata_solar_cmip6` | CDS / 2025 modified version |
+| Wind — CMIP6 wind-resource projections | Future wind viability screening | Raster | `bigdata_wind_cmip6` | CDS / 2025 modified version |
+| Hydro — CMIP6 runoff projections | Future hydropower viability screening | Raster; Point | `bigdata_hydro_cmip6` | CDS / 2025 modified version |
+
+*Abbreviations:* GADM, Global Administrative Areas; EEZ, Exclusive Economic Zone; JRC, European Commission Joint Research Centre; GHS-POP, Global Human Settlement Layer population grids; UN, United Nations; IEA, International Energy Agency; WEO, World Energy Outlook; NDC, Nationally Determined Contribution; GEM, Global Energy Monitor; CDS, Copernicus Climate Data Store; ECMWF, European Centre for Medium-Range Weather Forecasts; ERA5, ECMWF Fifth Reanalysis; CMIP6, Sixth Coupled Model Intercomparison Project.
+
+### Expected filenames in each folder
+
+The loader scripts expect the following files. Adjust the loader paths in [config.py](config.py) and the relevant `p1_*` scripts if your local layout differs.
+
+- `bigdata_gadm/gadm_410-levels.gpkg`
+- `bigdata_eez/eez_v12.gpkg`, `bigdata_eez/eez_boundaries_v12.gpkg`
+- `bigdata_settlements_jrc/GHS_POP_E2025_GLOBE_R2023A_4326_30ss_V1_0.tif`
+- `bigdata_gridfinder/grid.gpkg`
+- `bigdata_landcover_cds/outputs/landcover_2022_300arcsec.tif` (produced by `p1_c_prep_landcover.py`)
+- `bigdata_solar_wind_ms/solar_all_2024q2_v1.gpkg`, `bigdata_solar_wind_ms/wind_all_2024q2_v1.gpkg`
+- `bigdata_solar_pvout/PVOUT.tif`
+- `bigdata_wind_atlas/gasp_flsclassnowake_100m.tif`
+- `bigdata_hydro_atlas/RiverATLAS_Data_v10.gdb`
+- `bigdata_hydro_era5_land/downloads/` (ERA5-Land monthly runoff)
+- `bigdata_solar_cmip6/`, `bigdata_wind_cmip6/`, `bigdata_hydro_cmip6/` — each with `downloads/`, `extracted/`, `outputs/` subfolders populated by `p1_d`/`p1_e`/`p1_f`
+- `data_energy_ember/yearly_full_release_long_format*.csv` and NDC targets workbook
+- `data_energy_projections_iea/WEO_2024_PG_Assumptions_STEPSandNZE_Scenario.xlsb`, `WEO2024_AnnexA_Free_Dataset_*.csv`, `iea_iso3_mapping.csv`
+- `data_pop_un/WPP2024_TotalPopulationBySex*.csv`
+- `data_country_class_wb/*` (World Bank country classification table)
+- `data_facilities_gem/*` (GEM facility tables)
+
+## Data Records
+
+The archived dataset is deposited at **[Zenodo DOI]** (placeholder — replaced on publication). Records are organized as standardized country-year outputs for 189 countries × 3 model years (2024, 2030, 2050). Each country-year output contains four core components: generation facility layers, settlement-centroid electricity requirement and supply layers, transmission-network layers with routed supply paths, and a country-level summary table. Global supporting renewable viability screening layers for solar, wind, and hydropower are also included for 2030 and 2050.
+
+Geospatial vector layers are provided in **Parquet** (`.parquet`) format; country-level summaries in **Excel** (`.xlsx`) format. The renewable viability screening layers are provided as global supporting records for 2030 and 2050 only, with one Parquet and one GeoTIFF (`.tif`) file per technology (solar, wind, hydropower) — 12 global files total: 2 years × 2 formats × 3 technologies.
+
+### File naming
+
+Folder pattern for final post-siting outputs:
+
+- `2030_supply_100%_add_v2/` and `2050_supply_100%_add_v2/`
+  - `100%` = population coverage factor used for requirement downscaling.
+  - `_add_v2` = final network-based supply reallocation in stage (8) has been completed.
+- `2024_supply_100%/` (no `_add_v2` suffix) — the 2024 baseline is built from the initial allocation in stage (4); no additional siting is applied.
+- When the workflow is run for 2030 or 2050, the corresponding folders **without** `_add_v2` are generated as intermediate outputs after stage (4) and are not part of the final archive unless retained.
+
+Example final files for the Republic of Korea (ISO3 = `KOR`) in `2050_supply_100%_add_v2/`:
+
+- `facilities_KOR_add_v2.parquet` — generation facility layers
+- `centroids_KOR_add_v2.parquet` — settlement-centroid electricity requirement and supply layers
+- `polylines_KOR_add_v2.parquet` — transmission-network layers with routed supply paths
+- `2050_supply_100%_KOR_add_v2.xlsx` — country-level summary table
+
+Global renewable viability screening files identify the technology and model year directly in the file name, e.g. `HYDRO_VIABLE_CENTROIDS_2050.parquet`, with equivalent files for solar and wind in both Parquet and GeoTIFF.
+
+### Table 2. Core archived output components and selected key fields
+
+**Electricity generation facility layers** (Point vector, Parquet)
+
+| Field | Description | Unit / format |
+|---|---|---|
+| `OBJECTID` | Internal feature identifier | ID |
+| `GID_0` | ISO3 country code | e.g. `KOR` |
+| `GEM_unit_phase_ID` | Facility identifier from GEM or newly generated facility ID | Facility ID |
+| `Grouped_Type` | Harmonized facility technology type | One of: solar, wind, hydro, other renewables, nuclear, fossil |
+| `Latitude`, `Longitude` | Facility location coordinates | Decimal degrees |
+| `Adjusted_Capacity_MW` | Installed or scenario-adjusted facility capacity | MW |
+| `total_mwh` | Estimated annual electricity generation | MWh |
+| `available_total_mwh` | Annual electricity available for allocation | MWh |
+| `supplied_mwh` | Electricity allocated through network-based supply allocation | MWh |
+| `remaining_mwh` | Unallocated electricity remaining after allocation | MWh |
+
+**Settlement-centroid electricity requirement and supply layers** (Point vector, Parquet)
+
+| Field | Description | Unit / format |
+|---|---|---|
+| `fid` | Internal feature identifier | ID |
+| `GID_0` | ISO3 country code | e.g. `KOR` |
+| `centroid_idx` | Unique settlement-centroid identifier | Settlement-centroid ID |
+| `Population_centroid` | Baseline population in the grid cell | Persons |
+| `Population_[year]_centroid` | Projected population in the model year | Persons |
+| `Total_Demand_[year]_centroid` | Electricity requirement allocated to the settlement-centroid | MWh |
+| `supplying_facility_distance` | Distance to linked supplying facility or facilities | km |
+| `supplying_facility_type` | Technology type(s) of linked supplying facility or facilities | One or more of: solar, wind, hydro, other renewables, nuclear, fossil |
+| `supplying_facility_gem_id` | Identifier(s) of linked supplying facility or facilities | Facility ID(s) |
+| `supply_received_mwh` | Electricity supplied to the settlement-centroid | MWh |
+| `supply_status` | Allocation status of the settlement-centroid | One of: Filled, Partially Filled, Not Filled |
+
+**Modelled transmission-network layers** (Polyline vector, Parquet)
+
+| Field | Description | Unit / format |
+|---|---|---|
+| `fid` | Internal feature identifier | ID |
+| `GID_0` | ISO3 country code | e.g. `KOR` |
+| `connection_id` | Unique settlement-centroid–facility connection identifier | Path ID (centroid ID → facility ID) |
+| `centroid_idx` | Linked settlement-centroid identifier | Settlement ID |
+| `facility_gem_id` | Linked facility identifier | Facility ID |
+| `facility_type` | Technology type of linked facility | One of: solar, wind, hydro, other renewables, nuclear, fossil |
+| `distance_km` | Length of routed supply path | km |
+| `supply_mwh` | Electricity routed through the connection | MWh |
+| `active_supply` | Indicator for whether the connection carries allocated supply | Yes / No |
+| `Population_[year]_centroid` | Population of the linked settlement-centroid for the model year | Persons |
+
+**National summary tables** (Excel `.xlsx`)
+
+| Field | Description | Unit / format |
+|---|---|---|
+| Country and model year | Country name, ISO3 code, model year | Text, ISO3, year |
+| Configuration parameters | Key workflow settings, including assumed population coverage factor | Text, numeric |
+| Demand totals | Total national electricity requirements | MWh |
+| Available supply | Total electricity available from available generation facilities | MWh |
+| Supplied electricity | Total electricity allocated to settlement-centroids | MWh |
+| Unsupplied electricity | Remaining unmet electricity requirements after allocation | MWh |
+| Demand coverage | Share of electricity requirements supplied by the modelled allocation | Percent |
+| Technology breakdown | Requirements, available supply, and supplied electricity by technology type | MWh |
+| Settlement status counts | Number of filled, partially filled, and not-filled settlement-centroids | Count |
 
 ## Workflow Examples
 
@@ -382,10 +542,14 @@ sbatch submit_workflow.sh
 
 ## Outputs and Naming Conventions
 
+The canonical field schema for each archived layer is documented in [Data Records](#data-records) (Table 2). This section describes the on-disk folder and file patterns used by the workflow.
+
 ### Scenario Folder Pattern
 
 - outputs_per_country/parquet/{YEAR}_supply_{PCT}%/
 - outputs_per_country/parquet/{YEAR}_supply_{PCT}%_add_v2/
+
+The `_add_v2` suffix indicates that the final network-based supply reallocation in stage (8) has been completed. For 2024 outputs, the suffix is not used because the baseline year is built directly from the initial allocation in stage (4); no additional renewable siting is applied. Folders without `_add_v2` produced for 2030 or 2050 are intermediate outputs after stage (4) and are not part of the published archive unless retained.
 
 ### Typical Country Files
 
@@ -454,43 +618,6 @@ sbatch submit_workflow.sh
 Wrappers export BIGDATA_ROOT, BIGDATA_LOCAL_ROOT, BIGDATA_RETRY_COUNT, and BIGDATA_RETRY_SLEEP_SEC.
 The config resolver prefers cluster storage on SLURM jobs and local data for interactive runs.
 
-## Data Schema Reference
-
-This is a practical quick schema reference for commonly used outputs.
-
-### centroids_{ISO3}.parquet
-
-- geometry: point centroid
-- population and demand fields for analysis year
-- supply allocation and status fields
-
-### facilities_{ISO3}.parquet
-
-- geometry: facility or synthetic facility point
-- energy type, generation/capacity metrics
-- matching and allocation metadata
-
-### grid_lines_{ISO3}.parquet
-
-- geometry: line segments
-- line type and length/distance fields
-
-### polylines_{ISO3}.parquet
-
-- geometry: paths connecting demand-supply via network
-- source/target identifiers and distance metrics
-
-### siting_clusters_{ISO3}.parquet
-
-- geometry: cluster points
-- cluster demand, type, viability audit fields
-- split indicators for LP rebalance outputs when applicable
-
-### siting_networks_{ISO3}.parquet
-
-- geometry: proposed siting network lines
-- cluster linkage and topology metadata
-
 ## Troubleshooting
 
 ### Common Issues
@@ -519,7 +646,7 @@ This is a practical quick schema reference for commonly used outputs.
 This annex captures the upstream data preparation pipeline in detail.
 These scripts are typically run before country-level supply and siting analysis.
 
-### p1_a_ember_gem_2024.py
+### p1_a_ember_gem_2024.py *(Stage 1)*
 
 Purpose:
 
@@ -543,7 +670,7 @@ Typical run:
 python p1_a_ember_gem_2024.py
 ```
 
-### p1_b_ember_2024_30_50.py
+### p1_b_ember_2024_30_50.py *(Stage 2)*
 
 Purpose:
 
@@ -567,7 +694,7 @@ Typical run:
 python p1_b_ember_2024_30_50.py
 ```
 
-### p1_c_prep_landcover.py
+### p1_c_prep_landcover.py *(Stage 1)*
 
 Purpose:
 
@@ -591,7 +718,7 @@ python p1_c_prep_landcover.py
 python p1_c_prep_landcover.py --force
 ```
 
-### p1_d_viable_solar.py
+### p1_d_viable_solar.py *(Stage 6b)*
 
 Purpose:
 
@@ -622,7 +749,7 @@ python p1_d_viable_solar.py --download-only
 python p1_d_viable_solar.py --process-only
 ```
 
-### p1_e_viable_wind.py
+### p1_e_viable_wind.py *(Stage 6c)*
 
 Purpose:
 
@@ -654,7 +781,7 @@ python p1_e_viable_wind.py --download-only
 python p1_e_viable_wind.py --process-only
 ```
 
-### p1_f_utils_hydro.py
+### p1_f_utils_hydro.py *(Stage 6d — helpers)*
 
 Purpose:
 
@@ -665,7 +792,7 @@ Typical usage:
 
 - Imported by p1_f_viable_hydro.py (not usually run directly).
 
-### p1_f_viable_hydro.py
+### p1_f_viable_hydro.py *(Stage 6d)*
 
 Purpose:
 
@@ -711,5 +838,6 @@ python p1_f_viable_hydro.py
 
 ## Citation and License
 
+- **Manuscript reference:** Nature Scientific Data, DOI to be added on publication.
 - Citation metadata: [CITATION.cff](CITATION.cff)
 - License: [LICENSE](LICENSE)
