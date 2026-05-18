@@ -1,6 +1,6 @@
 # A global geospatial dataset of renewable electricity supply and network infrastructure for 2024, 2030 and 2050
 
-Python workflow accompanying the Nature Scientific Data manuscript of the same title. The workflow provides a comprehensive geospatial pipeline for country-level electricity supply–demand analysis, renewable siting, and climate-aware resource viability across 189 countries and three model years (2024, 2030, 2050).
+Python workflow accompanying a paper of the same title. The workflow provides a comprehensive geospatial pipeline for country-level electricity supply–demand analysis, renewable siting, and climate-aware resource viability across 189 countries and three model years (2024, 2030, 2050).
 
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -25,7 +25,7 @@ Python workflow accompanying the Nature Scientific Data manuscript of the same t
 
 ## Overview
 
-This repository contains the Python workflow accompanying a Nature Scientific Data manuscript that presents a global geospatial dataset of modelled renewable electricity supply and transmission-network infrastructure for **189 countries** and three model years (**2024, 2030, 2050**), at **300 arc-second resolution** (approximately 10 km at the equator). The workflow integrates observed electricity generation facilities, transmission-network proxies, national electricity-generation statistics, settlement-population data, renewable-resource baselines, and CMIP6 future-resource projections into 567 country-year runs.
+This repository contains the Python workflow accompanying a paper that presents a global geospatial dataset of modelled renewable electricity supply and transmission-network infrastructure for **189 countries** and three model years (**2024, 2030, 2050**), at **300 arc-second resolution** (approximately 10 km at the equator). The workflow integrates observed electricity generation facilities, transmission-network proxies, national electricity-generation statistics, settlement-population data, renewable-resource baselines, and CMIP6 future-resource projections into 567 country-year runs.
 
 For each country and model year, the workflow produces four core archived layers — generation facilities, settlement-centroid electricity requirements and supply, modelled transmission-network paths, and a national summary table — plus global renewable viability screening layers for solar, wind, and hydropower in 2030 and 2050. The dataset is intended to support energy-access assessment, renewable electricity planning, infrastructure resilience analysis, and integration with local or national datasets.
 
@@ -274,18 +274,10 @@ python process_country_siting.py KEN --supply-factor 0.9
   - Supports optional --tier override and scenario flags.
 
 - submit_workflow.sh
-  - Cluster wrapper for global combination run.
-
-### Figure and ETL Scripts
-
-Located in figure_scripts:
-
-- p1_na_results_data_etl.py
-  - Builds scenario/hazard exposure dataset used by plotting scripts.
-- p1_na_fig12.py, p1_na_fig34.py, p1_na_fig34_alt1.py, p1_na_fig56.py, p1_na_fig7.py, p1_na_fig8.py
-  - Figure generation scripts for results communication.
-- p1_z_fig_validation1.py, p1_z_fig_validation2.py, p1_z_fig_validation3.py
-  - Validation-oriented plotting scripts.
+  - SLURM batch wrapper for the final global combination stage.
+  - Runs `combine_global_results.py` on the cluster (default request: 64 GB RAM, 40 CPUs, 12 h on the `Medium` partition) to merge all per-country Parquet outputs in `outputs_per_country/` into per-scenario global GeoPackages in `outputs_global/`.
+  - Auto-detects scenarios from `outputs_per_country/parquet/`. Submit with `sbatch submit_workflow.sh` after all per-country supply and siting jobs have completed.
+  - Only required for users producing the merged global `.gpkg` files; can be skipped if you only need per-country outputs. Edit the SBATCH header and the hardcoded conda path near the top of the file to match your cluster.
 
 ## Configuration Guide
 
@@ -509,6 +501,44 @@ Global renewable viability screening files identify the technology and model yea
 | Technology breakdown | Requirements, available supply, and supplied electricity by technology type | MWh |
 | Settlement status counts | Number of filled, partially filled, and not-filled settlement-centroids | Count |
 
+### Global renewable viability screening layers (supporting records)
+
+Twelve global files are archived: 2 model years (2030, 2050) × 2 file formats (`.parquet`, `.tif`) × 3 technologies (solar, wind, hydro). File names include the technology and model year, e.g. `SOLAR_VIABLE_CENTROIDS_2030.parquet`, `WIND_VIABLE_CENTROIDS_2050.tif`, `HYDRO_VIABLE_CENTROIDS_2050.parquet`. The Parquet files contain only cells or river reaches retained as viable in stage (6); the GeoTIFF files store the projected resource value at viable cells and 0 elsewhere on the common 300 arc-second grid.
+
+**Solar and wind viable centroids** (`SOLAR_VIABLE_CENTROIDS_{year}.parquet`, `WIND_VIABLE_CENTROIDS_{year}.parquet`) — Point vector
+
+| Field | Description | Unit / format |
+|---|---|---|
+| `geometry` | Cell-centre point on the 300 arc-second grid | Point, EPSG:4326 |
+| `source` | Technology label | `solar` or `wind` |
+| `value_{year}` | Projected resource value for the model year (ensemble mean) | Solar: kWh/kWp/day (PVOUT). Wind: W/m² at 100 m (WPD) |
+| `value_baseline` | Baseline observation-constrained resource value | Same unit as `value_{year}` |
+| `delta` | CMIP6-derived relative change factor (projected / baseline) | Ratio |
+| `uncertainty` | Inter-model range across the CMIP6 ensemble | Same unit as `value_{year}` |
+| `is_ms_viable` | Flag: cell contains a Microsoft Global Renewables Watch reference site | Boolean |
+| `is_lc_valid` | Flag: cell passes the land-cover filter (see stages 6b / 6c) | Boolean |
+| `meets_threshold` | Flag: cell meets the productivity threshold (PVOUT ≥ 3.0 kWh/kWp/day or WPD ≥ 25 W/m²) | Boolean |
+| `is_viable` | Final viability flag: `is_ms_viable` OR (`is_lc_valid` AND `meets_threshold`); always True in the archived file | Boolean |
+
+**Hydro viable centroids** (`HYDRO_VIABLE_CENTROIDS_{year}.parquet`) — Point vector at RiverATLAS river-reach centroids
+
+| Field | Description | Unit / format |
+|---|---|---|
+| `geometry` | River-reach centroid point | Point, EPSG:4326 |
+| `HYRIV_ID` | RiverATLAS river-reach identifier | ID |
+| `dis_m3_pyr` | Baseline mean annual discharge (RiverATLAS) | m³/s |
+| `dis_m3_pmn` | Baseline minimum monthly discharge (RiverATLAS) | m³/s |
+| `dis_m3_pmx` | Baseline maximum monthly discharge (RiverATLAS) | m³/s |
+| `delta` | CMIP6-derived relative runoff change factor (projected / baseline) | Ratio |
+| `dis_m3_pyr_projected` | Projected mean annual discharge for the model year | m³/s |
+| `flow_reliability` | Ratio of minimum to mean monthly discharge | Ratio |
+| `ORD_STRA` | Strahler stream order | Integer |
+| `sgr_dk_rav` | River gradient | m/km |
+| `ele_mt_cav` | Reach elevation | m |
+| `UPLAND_SKM` | Upstream catchment area | km² |
+
+**Viability screening GeoTIFFs** (`{TECH}_VIABLE_CENTROIDS_{year}.tif`) — Raster on the 300 arc-second grid; viable cells carry the projected resource value (PVOUT, WPD, or projected discharge sampled to the grid), and non-viable cells carry 0.
+
 ## Workflow Examples
 
 ### Example 1: Single Country, Single Scenario
@@ -544,6 +574,9 @@ chmod +x submit_*.sh parallel_scripts/*.sh parallel_scripts_siting/*.sh
 # Optional add_v2 integration pass
 ./submit_all_parallel.sh --run-all-years --run-all-scenarios
 
+# Final global combination: merges all per-country Parquet outputs into per-scenario
+# global GeoPackages in outputs_global/. Run only after all per-country jobs above
+# have completed successfully.
 sbatch submit_workflow.sh
 ```
 
@@ -585,6 +618,16 @@ The `_add_v2` suffix indicates that the final network-based supply reallocation 
 - outputs_per_country/logs/workflow_*.out
 
 ## HPC Guide
+
+### Expected runtime per country
+
+Runtime varies strongly with country size, network density, and cluster node spec. As a rough guide:
+
+- **Small countries** (e.g. island states, small EEZ): a single supply or siting job typically completes in **under 1 minute**.
+- **Medium countries**: typically **minutes to a few hours** per job.
+- **Largest countries** (e.g. CHN, USA, RUS, BRA, IND, CAN): the supply job alone can take **more than 3 days** on a single node depending on cluster spec, primarily driven by network graph construction and shortest-path allocation across very large transmission networks.
+
+When submitting in bulk, allocate the largest countries to higher-tier nodes via the `--tier` option on the single-country submit scripts (see below).
 
 ### Submit All Supply Jobs
 
@@ -845,6 +888,6 @@ python p1_f_viable_hydro.py
 
 ## Citation and License
 
-- **Manuscript reference:** Nature Scientific Data, DOI to be added on publication.
+- **Relevant paper:** DOI to be added on publication.
 - Citation metadata: [CITATION.cff](CITATION.cff)
 - License: [LICENSE](LICENSE)

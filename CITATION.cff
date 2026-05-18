@@ -1,17 +1,58 @@
 cff-version: 1.2.0
-message: "If you use this dataset or code, please cite it as below."
-type: dataset
-authors:
-- family-names: "Jeong"
-  given-names: "Jihyeon"
-  orcid: "https://orcid.org/0009-0003-0812-9490"
-- family-names: "Hall"
-  given-names: "Jim W"
-  orcid: "https://orcid.org/0000-0002-2024-9191"
-- family-names: "Thomas"
-  given-names: "Fred"
-  orcid: "https://orcid.org/0000-0002-8441-5638"
-title: "Global Renewable Electricity Supply and Networks Dataset"
+message: >-
+  If you use this software, please cite it as below.
+  If you use the associated dataset, please cite the Zenodo record listed
+  under `references`. If you refer to results or methods, please cite the
+  manuscript listed under `preferred-citation`.
+type: software
+title: "Global Renewable Electricity Supply and Networks Workflow"
 version: 1.0.0
 url: "https://github.com/jjh6838/global-renewable-electricity-supply-networks"
-license: "MIT"
+repository-code: "https://github.com/jjh6838/global-renewable-electricity-supply-networks"
+license: MIT
+authors:
+  - family-names: "Jeong"
+    given-names: "Jihyeon"
+    orcid: "https://orcid.org/0009-0003-0812-9490"
+  - family-names: "Hall"
+    given-names: "Jim W"
+    orcid: "https://orcid.org/0000-0002-2024-9191"
+  - family-names: "Thomas"
+    given-names: "Fred"
+    orcid: "https://orcid.org/0000-0002-8441-5638"
+
+preferred-citation:
+  type: article
+  title: "A global geospatial dataset of renewable electricity supply and network infrastructure for 2024, 2030 and 2050"
+  authors:
+    - family-names: "Jeong"
+      given-names: "Jihyeon"
+      orcid: "https://orcid.org/0009-0003-0812-9490"
+    - family-names: "Hall"
+      given-names: "Jim W"
+      orcid: "https://orcid.org/0000-0002-2024-9191"
+    - family-names: "Thomas"
+      given-names: "Fred"
+      orcid: "https://orcid.org/0000-0002-8441-5638"
+  journal: "Scientific Data"
+  year: 2026
+  doi: "10.0000/TBD"  # Replace on publication
+
+references:
+  - type: data
+    title: "Global Renewable Electricity Supply and Networks Dataset"
+    authors:
+      - family-names: "Jeong"
+        given-names: "Jihyeon"
+        orcid: "https://orcid.org/0009-0003-0812-9490"
+      - family-names: "Hall"
+        given-names: "Jim W"
+        orcid: "https://orcid.org/0000-0002-2024-9191"
+      - family-names: "Thomas"
+        given-names: "Fred"
+        orcid: "https://orcid.org/0000-0002-8441-5638"
+    year: 2026
+    publisher:
+      name: "Zenodo"
+    doi: "10.5281/zenodo.TBD"  # Replace with Zenodo DOI on deposit
+    url: "https://doi.org/10.5281/zenodo.TBD"
