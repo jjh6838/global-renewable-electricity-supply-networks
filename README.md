@@ -54,7 +54,7 @@ Sample data for the Republic of Korea are available in the `sample_data` subfold
 ├── figure_scripts/
 ├── sample_data/, sample_maps/
 ├── outputs_arcgis/, outputs_global/, outputs_per_country/, outputs_processed_data/
-└── zenodo_package_v1_0_0/, zenodo_package_v1_0_1/
+└── zenodo_package/                  # Local tools and files for building the Zenodo dataset ZIP
 ```
 
 Large `bigdata_*` inputs and generated `outputs_*` are not required to inspect the code, but are needed for corresponding full workflow runs. The Zenodo dataset archive is separate from the code repository.
