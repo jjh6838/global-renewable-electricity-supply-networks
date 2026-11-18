@@ -567,7 +567,7 @@ def main():
     parser.add_argument('--output', default=None, 
                        help='Output file (.gpkg for visualization, .parquet for data). Auto-generated if not specified.')
     parser.add_argument('--scenario', default=None,
-                       help='Scenario subfolder name under parquet directory (e.g., "2050_supply_100%%")')
+                       help='Scenario subfolder name under parquet directory (e.g., "2050_supply_100%%_80pct")')
     parser.add_argument('--countries', nargs='+',
                        help='Optional list of ISO3 country codes to process (e.g., --countries USA CHN IND)')
     parser.add_argument('--countries-file', 
@@ -589,7 +589,12 @@ def main():
         # Look for all scenario subfolders in the parquet directory
         parquet_base = Path(args.input_dir) / "parquet"
         if parquet_base.exists():
-            subfolders = [d.name for d in parquet_base.iterdir() if d.is_dir()]
+            subfolders = sorted(
+                d.name for d in parquet_base.iterdir()
+                if d.is_dir() and re.fullmatch(
+                    r"\d{4}_supply_\d+%(?:_(?:100|80|60)pct)?(?:_add_v2)?", d.name
+                )
+            )
             if subfolders:
                 scenarios_to_process = subfolders
                 logger.info(f"Found {len(scenarios_to_process)} scenario subfolders: {scenarios_to_process}")

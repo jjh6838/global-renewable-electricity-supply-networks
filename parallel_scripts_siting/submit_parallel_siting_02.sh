@@ -1,11 +1,12 @@
 #!/bin/bash --login
 #SBATCH --job-name=p02s_t1
-#SBATCH --partition=Short
-#SBATCH --time=12:00:00
-#SBATCH --mem=25G
+#SBATCH --partition=Long
+#SBATCH --time=168:00:00
+#SBATCH --mem=0
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=40
+#SBATCH --cpus-per-task=112
+#SBATCH --exclusive
 #SBATCH --output=outputs_per_country/logs/siting_02_%j.out
 #SBATCH --error=outputs_per_country/logs/siting_02_%j.err
 #SBATCH --mail-type=END,FAIL
@@ -14,8 +15,8 @@ set -euo pipefail
 cd "$SLURM_SUBMIT_DIR"
 
 echo "[INFO] Starting siting analysis script 2/25 (T1) at $(date)"
-echo "[INFO] Processing 1 countries in this batch: IND"
-echo "[INFO] Tier: T1 | Memory: 25G | CPUs: 40 | Time: 12:00:00"
+echo "[INFO] Processing 1 countries in this batch: CHN"
+echo "[INFO] Tier: T1 | Memory: 0 | CPUs: 112 | Time: 168:00:00"
 
 # --- directories ---
 mkdir -p outputs_per_country/logs outputs_global
@@ -45,18 +46,18 @@ fi
 
 # Process countries in this batch
 
-echo "[INFO] Processing siting analysis for IND (T1)..."
+echo "[INFO] Processing siting analysis for CHN (T1)..."
 MAX_RETRIES=3
 for ATTEMPT in $(seq 1 $MAX_RETRIES); do
-    if $PY process_country_siting.py IND $SCENARIO_FLAG; then
-        echo "[SUCCESS] IND siting analysis completed (attempt $ATTEMPT)"
+    if $PY process_country_siting.py CHN $SCENARIO_FLAG; then
+        echo "[SUCCESS] CHN siting analysis completed (attempt $ATTEMPT)"
         break
     else
         if [ "$ATTEMPT" -lt "$MAX_RETRIES" ]; then
-            echo "[WARN] IND siting failed on attempt $ATTEMPT/$MAX_RETRIES - retrying in 10s..."
+            echo "[WARN] CHN siting failed on attempt $ATTEMPT/$MAX_RETRIES - retrying in 10s..."
             sleep 10
         else
-            echo "[ERROR] IND siting analysis failed after $MAX_RETRIES attempts"
+            echo "[ERROR] CHN siting analysis failed after $MAX_RETRIES attempts"
         fi
     fi
 done

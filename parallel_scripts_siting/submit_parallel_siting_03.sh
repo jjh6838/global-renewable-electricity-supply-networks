@@ -14,7 +14,7 @@ set -euo pipefail
 cd "$SLURM_SUBMIT_DIR"
 
 echo "[INFO] Starting siting analysis script 3/25 (T1) at $(date)"
-echo "[INFO] Processing 1 countries in this batch: USA"
+echo "[INFO] Processing 1 countries in this batch: IND"
 echo "[INFO] Tier: T1 | Memory: 25G | CPUs: 40 | Time: 12:00:00"
 
 # --- directories ---
@@ -45,18 +45,18 @@ fi
 
 # Process countries in this batch
 
-echo "[INFO] Processing siting analysis for USA (T1)..."
+echo "[INFO] Processing siting analysis for IND (T1)..."
 MAX_RETRIES=3
 for ATTEMPT in $(seq 1 $MAX_RETRIES); do
-    if $PY process_country_siting.py USA $SCENARIO_FLAG; then
-        echo "[SUCCESS] USA siting analysis completed (attempt $ATTEMPT)"
+    if $PY process_country_siting.py IND $SCENARIO_FLAG; then
+        echo "[SUCCESS] IND siting analysis completed (attempt $ATTEMPT)"
         break
     else
         if [ "$ATTEMPT" -lt "$MAX_RETRIES" ]; then
-            echo "[WARN] USA siting failed on attempt $ATTEMPT/$MAX_RETRIES - retrying in 10s..."
+            echo "[WARN] IND siting failed on attempt $ATTEMPT/$MAX_RETRIES - retrying in 10s..."
             sleep 10
         else
-            echo "[ERROR] USA siting analysis failed after $MAX_RETRIES attempts"
+            echo "[ERROR] IND siting analysis failed after $MAX_RETRIES attempts"
         fi
     fi
 done

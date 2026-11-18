@@ -28,7 +28,108 @@
 # ==================================================================================================
 
 import pandas as pd
+import numpy as np
 import itertools
+
+
+def enforce_minimum_floor(values, previous_values):
+    """Apply the minimum rule: future technology values cannot fall below the previous period."""
+    adjusted = {}
+    for technology, value in values.items():
+        value = float(value or 0)
+        baseline = float(previous_values.get(technology, 0) or 0)
+        adjusted[technology] = max(value, baseline)
+    return adjusted
+
+
+def enforce_minimum_and_plausibility(values, previous_values, resource_limits=None):
+    """Keep the minimum floor intact and optionally cap values by a resource-based limit."""
+    adjusted = enforce_minimum_floor(values, previous_values)
+    if not resource_limits:
+        return adjusted
+
+    bounded = {}
+    for technology, value in adjusted.items():
+        limit = resource_limits.get(technology)
+        if limit is None:
+            bounded[technology] = value
+        else:
+            bounded[technology] = min(float(value), float(limit))
+    return bounded
+
+
+def rescale_with_floor(values, previous_values, target_total, resource_limits=None):
+    """Rescale only volumes above the floor so the minimum rule cannot be overridden."""
+    floored = enforce_minimum_and_plausibility(values, previous_values, resource_limits)
+    floor_total = sum(floored.values())
+
+    if target_total <= floor_total:
+        return floored
+
+    scalable = {
+        technology: amount
+        for technology, amount in floored.items()
+        if amount > float(previous_values.get(technology, 0) or 0)
+    }
+    if not scalable:
+        return floored
+
+    fixed_total = sum(
+        float(previous_values.get(technology, 0) or 0)
+        for technology in floored
+        if float(floored.get(technology, 0)) <= float(previous_values.get(technology, 0) or 0)
+    )
+    scalable_total = sum(scalable.values())
+    if scalable_total <= 0:
+        return floored
+
+    required_above_floor = target_total - fixed_total
+    if required_above_floor <= 0:
+        return floored
+
+    scale_factor = required_above_floor / scalable_total
+    adjusted = dict(floored)
+    for technology, amount in scalable.items():
+        adjusted[technology] = amount * scale_factor
+
+    for technology, baseline in previous_values.items():
+        adjusted[technology] = max(float(adjusted.get(technology, 0) or 0), float(baseline or 0))
+
+    return adjusted
+
+
+def screen_country_plausibility(country_name, values, previous_values, resource_limits=None):
+    """Flag a country if scenario values violate the minimum rule or resource ceiling."""
+    floored = enforce_minimum_floor(values, previous_values)
+    flags = []
+
+    for technology, value in values.items():
+        previous = float(previous_values.get(technology, 0) or 0)
+        current = float(value or 0)
+        floor_value = float(floored.get(technology, 0) or 0)
+
+        if current < previous:
+            flags.append({
+                "country": country_name,
+                "technology": technology,
+                "issue": "minimum_rule_violation",
+                "value": current,
+                "previous": previous,
+                "floor": floor_value,
+            })
+
+        if resource_limits is not None:
+            limit = resource_limits.get(technology)
+            if limit is not None and current > float(limit):
+                flags.append({
+                    "country": country_name,
+                    "technology": technology,
+                    "issue": "resource_ceiling_exceeded",
+                    "value": current,
+                    "resource_limit": float(limit),
+                })
+
+    return {"country": country_name, "ok": not flags, "flags": flags}
 
 # Task 1
 # Load the first dataset 
@@ -486,7 +587,7 @@ for index, row in final_merged_df.iterrows():
     total_gen_2030 = renewables_sum + fossil + nuclear
     
     # ALWAYS enforce minimum rule first: 2030 >= 2024 for each energy type (applies to ALL countries)
-    renewables_2030 = {k: max(renewables_2030[k], renewables_2024[k]) for k in energy_types2}
+    renewables_2030 = enforce_minimum_and_plausibility(renewables_2030, renewables_2024)
     renewables_sum = sum(renewables_2030.values())
     
     if total_gen_2030 > 0 and target_share > 0 and renewables_sum > 0:
@@ -494,35 +595,35 @@ for index, row in final_merged_df.iterrows():
             desired_renewable_total = renewables_sum
         else:
             desired_renewable_total = target_share * (fossil + nuclear) / (1 - target_share)
-        
-        # Initial scaling
-        scaling_factor = desired_renewable_total / renewables_sum
-        scaled = {k: v * scaling_factor for k, v in renewables_2030.items()}
-        
-        # Enforce minimum = 2024 value
-        fixed = {k: max(scaled[k], renewables_2024[k]) for k in energy_types2}
-        
-        # If sum is now above target, re-scale only those not fixed at 2024 value
-        fixed_sum = sum(v for k, v in fixed.items() if v == renewables_2024[k])
-        to_scale = [k for k in energy_types2 if fixed[k] > renewables_2024[k]]
-        if to_scale:
-            remaining = desired_renewable_total - fixed_sum
-            if remaining < 0:
-                # If fixed_sum already exceeds target, set all to 2024 value
-                for k in energy_types2:
-                    final_merged_df.at[index, k] = renewables_2024[k]
-            else:
-                scale_sum = sum(fixed[k] for k in to_scale)
-                if scale_sum > 0:
-                    rescale_factor = remaining / scale_sum
-                    for k in to_scale:
-                        final_merged_df.at[index, k] = fixed[k] * rescale_factor
-                    for k in energy_types2:
-                        if fixed[k] == renewables_2024[k]:
-                            final_merged_df.at[index, k] = renewables_2024[k]
-        else:
+
+        # The minimum rule must stay ahead of all re-scaling. Only technologies
+        # above their floor are allowed to absorb proportional changes.
+        adjusted_2030 = renewables_2030.copy()
+        if desired_renewable_total <= sum(adjusted_2030.values()):
             for k in energy_types2:
-                final_merged_df.at[index, k] = fixed[k]
+                final_merged_df.at[index, k] = adjusted_2030[k]
+        else:
+            scalable = {k: v for k, v in adjusted_2030.items() if v > renewables_2024[k]}
+            fixed_total = sum(renewables_2024[k] for k in energy_types2 if adjusted_2030[k] <= renewables_2024[k])
+            if not scalable:
+                for k in energy_types2:
+                    final_merged_df.at[index, k] = adjusted_2030[k]
+            else:
+                scale_sum = sum(scalable.values())
+                if scale_sum > 0:
+                    rescale_factor = (desired_renewable_total - fixed_total) / scale_sum
+                    for k in energy_types2:
+                        if adjusted_2030[k] <= renewables_2024[k]:
+                            final_merged_df.at[index, k] = renewables_2024[k]
+                        else:
+                            final_merged_df.at[index, k] = adjusted_2030[k] * rescale_factor
+                else:
+                    for k in energy_types2:
+                        final_merged_df.at[index, k] = adjusted_2030[k]
+
+                # Critical safety check: the target-rescaling cannot override the floor.
+                for k in energy_types2:
+                    final_merged_df.at[index, k] = max(final_merged_df.at[index, k], renewables_2024[k])
     else:
         # If not enough data for share-based adjustment, still enforce minimum rule
         for k in energy_types2:
@@ -578,20 +679,22 @@ for energy_type in energy_types2:
     )
 
 
-# 7.3: Adjust renewable generation for 2050 to meet IEA target shares and enforce minimum rule
-def new_func(ndc_target_share, iea_2050_target_share):
-    target_share_2050 = max(ndc_target_share, iea_2050_target_share)
-    return target_share_2050
+# 7.3: Adjust renewable generation for 2050 to meet the policy target and enforce minimum rule.
+# Default rule: prefer the country's own target when available; only fall back to the benchmark/IEA
+# target when no national target is available or is effectively missing.
+def resolve_2050_target_share(ndc_target_share, iea_2050_target_share):
+    if pd.notnull(ndc_target_share) and ndc_target_share > 0:
+        return ndc_target_share
+    return iea_2050_target_share
 
 for index, row in final_merged_df.iterrows():
     income_group = row.get("Income group", None)
-    # Determine the target share for 2050
-    # We take the higher of the country's own 2030 NDC target or the IEA Stated Policies target (earlier it was global pledge target so code variable names not consistent)
+    # Prefer the country's own policy target as the baseline for 2050;
+    # use the benchmark/IEA share only as a fallback when no national target is available.
     ndc_target_share = row.get("res_share_target", 0) / 100 if pd.notnull(row.get("res_share_target")) else 0
     iea_2050_target_share = iea_pledge_re_targets_2050.get(income_group, 69.0539398840614 / 100)  # Default to 69.05% if not found
     
-    # Use the greater of the NDC target or the IEA pledge target
-    target_share_2050 = new_func(ndc_target_share, iea_2050_target_share)
+    target_share_2050 = resolve_2050_target_share(ndc_target_share, iea_2050_target_share)
     final_merged_df.at[index, "Target_Share_2050"] = target_share_2050
 
     # Use appropriate fossil and nuclear values for 2050
@@ -612,7 +715,7 @@ for index, row in final_merged_df.iterrows():
     total_gen_2030 = renewables_2030_sum + fossil_2030 + nuclear_2030
     
     # ALWAYS enforce individual energy type minimum rule first (2050 >= 2030 for each type)
-    renewables_2050 = {k: max(renewables_2050[k], renewables_2030[k]) for k in energy_types_2050}
+    renewables_2050 = enforce_minimum_and_plausibility(renewables_2050, renewables_2030)
     renewables_sum = sum(renewables_2050.values())
     total_gen_2050 = renewables_sum + fossil + nuclear
     
@@ -622,34 +725,31 @@ for index, row in final_merged_df.iterrows():
             desired_renewable_total = renewables_sum
         else:
             desired_renewable_total = target_share_2050 * (fossil + nuclear) / (1 - target_share_2050)
-        
-        # Initial scaling for renewable share targets
-        scaling_factor = desired_renewable_total / renewables_sum
-        scaled = {k: v * scaling_factor for k, v in renewables_2050.items()}
-        
-        # Apply individual energy type minimum rule (2050 >= 2030 for each type)
-        renewables_2050 = {k: max(scaled[k], renewables_2030[k]) for k in energy_types_2050}
-        
-        # If sum is now above target, re-scale only those not fixed at 2030 value
-        fixed_sum = sum(v for k, v in renewables_2050.items() if v == renewables_2030[k])
-        to_scale = [k for k in energy_types_2050 if renewables_2050[k] > renewables_2030[k]]
-        
-        if to_scale:
-            remaining = desired_renewable_total - fixed_sum
-            if remaining < 0:
-                # If fixed_sum already exceeds target, set all to 2030 value
-                renewables_2050 = {k: renewables_2030[k] for k in energy_types_2050}
+
+        # Floor must always dominate. Any proportional rebalancing can only operate
+        # on technologies above their 2030 floor.
+        adjusted_2050 = renewables_2050.copy()
+        if desired_renewable_total <= sum(adjusted_2050.values()):
+            renewables_2050 = adjusted_2050
+        else:
+            scalable = {k: v for k, v in adjusted_2050.items() if v > renewables_2030[k]}
+            fixed_total = sum(renewables_2030[k] for k in energy_types_2050 if adjusted_2050[k] <= renewables_2030[k])
+            if not scalable:
+                renewables_2050 = adjusted_2050
             else:
-                scale_sum = sum(renewables_2050[k] for k in to_scale)
+                scale_sum = sum(scalable.values())
                 if scale_sum > 0:
-                    rescale_factor = remaining / scale_sum
+                    rescale_factor = (desired_renewable_total - fixed_total) / scale_sum
                     for k in energy_types_2050:
-                        if renewables_2050[k] == renewables_2030[k]:
-                            # Keep at 2030 level (already at minimum)
-                            pass
+                        if adjusted_2050[k] <= renewables_2030[k]:
+                            renewables_2050[k] = renewables_2030[k]
                         else:
-                            # Scale down proportionally
-                            renewables_2050[k] = renewables_2050[k] * rescale_factor
+                            renewables_2050[k] = adjusted_2050[k] * rescale_factor
+                else:
+                    renewables_2050 = adjusted_2050
+
+                for k in energy_types_2050:
+                    renewables_2050[k] = max(renewables_2050[k], renewables_2030[k])
     
     # Update renewables_sum after individual energy type minimum rules
     renewables_sum = sum(renewables_2050.values())
@@ -657,27 +757,18 @@ for index, row in final_merged_df.iterrows():
     
     # Then, apply total generation minimum rule (after individual type minimums)
     if total_gen_2050 < total_gen_2030 and total_gen_2030 > 0:
-        # Scale up renewables proportionally to meet minimum total generation
-        # This applies AFTER individual energy type minimums are enforced
-        # WHY: We assume total electricity generation will not decrease between 2030 and 2050.
-        
         if renewables_sum > 0:
-            # Calculate required increase in total generation
             required_total_increase = total_gen_2030 - total_gen_2050
-            
-            # Scale up renewables proportionally to make up the difference
             renewable_scaling_factor = (renewables_sum + required_total_increase) / renewables_sum
-            
-            # Apply reasonable bounds to scaling factor to prevent extreme values
-            renewable_scaling_factor = min(renewable_scaling_factor, 5.0)  # Cap at 5x increase
-            
-            # Scale all renewable types proportionally (preserving their relative proportions)
+            renewable_scaling_factor = min(renewable_scaling_factor, 5.0)
             renewables_2050 = {k: v * renewable_scaling_factor for k, v in renewables_2050.items()}
         else:
-            # If renewables are zero, we can't scale them up
-            # In this rare case, keep values at 2030 minimum
             renewables_2050 = renewables_2030
-    
+
+    # Final floor protection: the minimum rule has priority over any rescaling.
+    for k in energy_types_2050:
+        renewables_2050[k] = max(renewables_2050[k], renewables_2030[k])
+
     # Apply the final renewable values to the dataframe
     for k in energy_types_2050:
         final_merged_df.at[index, k] = renewables_2050[k]
@@ -760,21 +851,73 @@ print(f"Countries with min rule applied for 2050: {countries_min_rule_2050}/{tot
 print("=== END VERIFICATION ===\n")
 
 ### Last Task
+# Add explicit source flags so each country can be traced back to either a national NDC or a benchmark-based extrapolation.
+final_merged_df["NDC_Source_2030"] = final_merged_df["Category"].notna().map({True: "NDC", False: "Benchmark"})
+final_merged_df["NDC_Source_2050"] = final_merged_df["NDC_Source_2030"].copy()
+
 # Clean up the column order in the final merged dataset
 column_order = [
     "Country Name", "ISO3_code", "Region", "Income group", 
     "PopTotal_2024", "PopTotal_2030", "PopTotal_2050", "Growth_Factor_2024_2030", "Growth_Factor_2024_2050",
     "Hydro_2024", "Solar_2024", "Wind_2024", "Other Renewables_2024", "Nuclear_2024", "Fossil_2024",
     "Hydro_2024_MWh", "Solar_2024_MWh", "Wind_2024_MWh", "Other Renewables_2024_MWh","Nuclear_2024_MWh", "Fossil_2024_MWh",
-    "res_capacity_target", "res_share_target", "Category",
+    "res_capacity_target", "res_share_target", "Target_Share_2050", "Category", "NDC_Source_2030", "NDC_Source_2050",
     "Hydro_2030", "Solar_2030", "Wind_2030", "Other Renewables_2030", 
     "Hydro_2030_MWh", "Solar_2030_MWh", "Wind_2030_MWh", "Other Renewables_2030_MWh", "Nuclear_2030_MWh", "Fossil_2030_MWh",
     "Hydro_2050_MWh", "Solar_2050_MWh", "Wind_2050_MWh", "Other Renewables_2050_MWh", "Nuclear_2050_MWh", "Fossil_2050_MWh"
     ]
 final_merged_df = final_merged_df[column_order]
 
+# Create three scenario exports for sensitivity testing.
+# 100% = current scenario, 80% = moderate path, 60% = lower renewable ambition path.
+# We preserve a minimum floor so that lower-ambition sensitivity cases cannot fall below
+# the relevant earlier-year technology value. This keeps the scenario meaningful without
+# allowing implausible backtracking in technology totals.
+scenario_scales = {
+    "100pct": 1.0,
+    "80pct": 0.8,
+    "60pct": 0.6,
+}
+renewable_mwh_cols = [
+    "Hydro_2030_MWh", "Solar_2030_MWh", "Wind_2030_MWh", "Other Renewables_2030_MWh",
+    "Hydro_2050_MWh", "Solar_2050_MWh", "Wind_2050_MWh", "Other Renewables_2050_MWh",
+]
+
+# Minimum floor mapping from the target year to the relevant earlier year.
+# 2030 values cannot fall below 2024; 2050 values cannot fall below 2030.
+min_floor_map = {
+    "Hydro_2030_MWh": "Hydro_2024_MWh",
+    "Solar_2030_MWh": "Solar_2024_MWh",
+    "Wind_2030_MWh": "Wind_2024_MWh",
+    "Other Renewables_2030_MWh": "Other Renewables_2024_MWh",
+    "Hydro_2050_MWh": "Hydro_2030_MWh",
+    "Solar_2050_MWh": "Solar_2030_MWh",
+    "Wind_2050_MWh": "Wind_2030_MWh",
+    "Other Renewables_2050_MWh": "Other Renewables_2030_MWh",
+}
+
+for scenario_name, scale in scenario_scales.items():
+    scenario_df = final_merged_df.copy()
+    scenario_df["Scenario_Target_Level"] = scenario_name
+    scenario_df["Scenario_Target_Scale"] = scale
+    for col in renewable_mwh_cols:
+        if col in scenario_df.columns:
+            floor_col = min_floor_map.get(col)
+            if floor_col is not None and floor_col in scenario_df.columns:
+                scenario_df[col] = np.maximum(
+                    scenario_df[col] * scale,
+                    scenario_df[floor_col]
+                )
+            else:
+                scenario_df[col] = scenario_df[col] * scale
+    if "res_share_target" in scenario_df.columns:
+        scenario_df["res_share_target"] = scenario_df["res_share_target"] * scale
+    out_path = f"outputs_processed_data/p1_b_ember_2024_30_50_{scenario_name}.xlsx"
+    scenario_df.to_excel(out_path, index=False)
+    print(f"Saved scenario export: {out_path}")
+
 print("Final number of countries: ", final_merged_df["ISO3_code"].nunique())
 
-# Save the final merged dataset to a CSV file
-final_merged_df.to_excel("outputs_processed_data/p1_b_ember_2024_30_50.xlsx", index=False)
+# Keep the 100% file as the default dataset for downstream scripts.
+final_merged_df.to_excel("outputs_processed_data/p1_b_ember_2024_30_50_100pct.xlsx", index=False)
 

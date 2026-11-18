@@ -1,6 +1,6 @@
 #!/bin/bash
 # Submit all parallel jobs immediately (SLURM will queue them automatically)
-# Usage: ./submit_all_parallel.sh [--run-all-years] [--run-all-scenarios] [--supply-factor <value>]
+# Usage: ./submit_all_parallel.sh [--run-all-years] [--run-all-supply-factors|--run-all-scenarios] [--supply-factor <value>] [--scenario 100pct|80pct|60pct]
 
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     cd "$SCRIPT_DIR"
@@ -9,6 +9,7 @@
 RUN_ALL_SCENARIOS=""
 RUN_ALL_YEARS=""
 SUPPLY_FACTOR=""
+SCENARIO_NAME=""
 SBATCH_EXPORT=""
 
 # Resolve model year from config.py (override with ANALYSIS_YEAR env var if set)
@@ -20,7 +21,7 @@ PY
 
 while [ $# -gt 0 ]; do
     case $1 in
-        --run-all-scenarios)
+        --run-all-supply-factors|--run-all-scenarios)
             RUN_ALL_SCENARIOS="1"
             shift
             ;;
@@ -36,14 +37,22 @@ while [ $# -gt 0 ]; do
             SUPPLY_FACTOR="$2"
             shift 2
             ;;
+        --scenario)
+            if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                echo "Error: --scenario requires a value (100pct, 80pct, or 60pct)"
+                exit 1
+            fi
+            SCENARIO_NAME="$2"
+            shift 2
+            ;;
         -*)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--run-all-years] [--run-all-scenarios] [--supply-factor <value>]"
+            echo "Usage: $0 [--run-all-years] [--run-all-supply-factors|--run-all-scenarios] [--supply-factor <value>] [--scenario 100pct|80pct|60pct]"
             exit 1
             ;;
         *)
             echo "Unknown argument: $1"
-            echo "Usage: $0 [--run-all-years] [--run-all-scenarios] [--supply-factor <value>]"
+            echo "Usage: $0 [--run-all-years] [--run-all-supply-factors|--run-all-scenarios] [--supply-factor <value>] [--scenario 100pct|80pct|60pct]"
             exit 1
             ;;
     esac
@@ -52,55 +61,70 @@ done
 # Convenience mode: submit 2024, 2030, 2050 in one command.
 if [ -n "$RUN_ALL_YEARS" ]; then
     echo "[INFO] Running all years (2024, 2030, 2050)"
+    YEAR_ARGS=()
+    if [ -n "$SCENARIO_NAME" ]; then YEAR_ARGS+=(--scenario "$SCENARIO_NAME"); fi
+    if [ -n "$SUPPLY_FACTOR" ]; then
+        YEAR_ARGS+=(--supply-factor "$SUPPLY_FACTOR")
+    elif [ -n "$RUN_ALL_SCENARIOS" ]; then
+        YEAR_ARGS+=(--run-all-scenarios)
+    fi
     for YEAR in 2024 2030 2050; do
         echo ""
         echo "[INFO] Submitting year: $YEAR"
-        if [ -n "$SUPPLY_FACTOR" ]; then
-            ANALYSIS_YEAR="$YEAR" "$0" --supply-factor "$SUPPLY_FACTOR"
-        elif [ -n "$RUN_ALL_SCENARIOS" ]; then
-            ANALYSIS_YEAR="$YEAR" "$0" --run-all-scenarios
-        else
-            ANALYSIS_YEAR="$YEAR" "$0"
-        fi
+        ANALYSIS_YEAR="$YEAR" "$0" "${YEAR_ARGS[@]}"
     done
     exit 0
 fi
 
 # Build SBATCH_EXPORT based on flags
-if [ -n "$SUPPLY_FACTOR" ]; then
-    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR,SUPPLY_FACTOR=$SUPPLY_FACTOR"
-    # Convert supply factor to percentage (e.g., 0.9 -> 90)
-    SCENARIO_PCT=$(echo "$SUPPLY_FACTOR * 100" | bc | cut -d. -f1)
-    SCENARIO="${ANALYSIS_YEAR}_supply_${SCENARIO_PCT}%"
-    echo "[INFO] Running single scenario: $SUPPLY_FACTOR (supply factor ${SCENARIO_PCT}%)"
-elif [ -n "$RUN_ALL_SCENARIOS" ]; then
-    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR,RUN_ALL_SCENARIOS=1"
-    SCENARIO="all_scenarios"
-    echo "[INFO] Running ALL scenarios (100%, 90%, 80%, 70%, 60%)"
-else
-    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR"
-    SCENARIO="${ANALYSIS_YEAR}_supply_100%"
-    echo "[INFO] Running default scenario: 100%"
-fi
+SITING_RUN=0
 
-# Create scenario-specific log directory (route to add_v2 logs on second supply run)
-if [ -z "$RUN_ALL_SCENARIOS" ]; then
-    YEAR_PART="${SCENARIO%%_supply_*}"
-    PCT_PART="${SCENARIO##*_supply_}"
-    if compgen -G "outputs_per_country/parquet/${SCENARIO}/${YEAR_PART}_siting_${PCT_PART}_*.xlsx" > /dev/null; then
-        LOG_DIR="outputs_per_country/parquet/${SCENARIO}_add_v2/logs"
-        echo "[INFO] Detected siting outputs for ${SCENARIO}; using add_v2 log directory"
-    else
-        LOG_DIR="outputs_per_country/parquet/${SCENARIO}/logs"
-    fi
-else
-    if compgen -G "outputs_per_country/parquet/${ANALYSIS_YEAR}_supply_100%/${ANALYSIS_YEAR}_siting_100%_*.xlsx" > /dev/null ||        compgen -G "outputs_per_country/parquet/${ANALYSIS_YEAR}_supply_90%/${ANALYSIS_YEAR}_siting_90%_*.xlsx" > /dev/null ||        compgen -G "outputs_per_country/parquet/${ANALYSIS_YEAR}_supply_80%/${ANALYSIS_YEAR}_siting_80%_*.xlsx" > /dev/null ||        compgen -G "outputs_per_country/parquet/${ANALYSIS_YEAR}_supply_70%/${ANALYSIS_YEAR}_siting_70%_*.xlsx" > /dev/null ||        compgen -G "outputs_per_country/parquet/${ANALYSIS_YEAR}_supply_60%/${ANALYSIS_YEAR}_siting_60%_*.xlsx" > /dev/null; then
-        LOG_DIR="outputs_per_country/parquet/logs_run_all_scenarios_add_v2"
-        echo "[INFO] Detected siting outputs for run-all scenarios; using add_v2 log directory"
-    else
-        LOG_DIR="outputs_per_country/parquet/logs_run_all_scenarios"
-    fi
+if [ -n "$SUPPLY_FACTOR" ] && [ -n "$RUN_ALL_SCENARIOS" ]; then
+    echo "Error: --supply-factor cannot be combined with --run-all-supply-factors"
+    exit 1
 fi
+if [ -n "${SCENARIO_NAME:-}" ]; then
+    case "$SCENARIO_NAME" in
+        100pct|100%|1.0|100) WORKBOOK_SCENARIO="100pct" ;;
+        80pct|80%|0.8|80) WORKBOOK_SCENARIO="80pct" ;;
+        60pct|60%|0.6|60) WORKBOOK_SCENARIO="60pct" ;;
+        *) echo "Error: unsupported scenario '$SCENARIO_NAME'"; exit 1 ;;
+    esac
+    export P1_B_SCENARIO_FILE="outputs_processed_data/p1_b_ember_2024_30_50_${WORKBOOK_SCENARIO}.xlsx"
+else
+    export P1_B_SCENARIO_FILE="${P1_B_SCENARIO_FILE:-outputs_processed_data/p1_b_ember_2024_30_50_100pct.xlsx}"
+fi
+SCENARIO_INFO=$(python - "${SUPPLY_FACTOR:-1.0}" <<'PY'
+import sys
+from config import ANALYSIS_YEAR, get_projection_scenario_name, get_supply_scenario_name
+factor = float(sys.argv[1])
+if not 0 < factor <= 1:
+    raise ValueError("Supply Factor must be greater than 0 and at most 1")
+print(get_projection_scenario_name(), get_supply_scenario_name(ANALYSIS_YEAR, factor))
+PY
+) || exit 1
+read -r WORKBOOK_SCENARIO SCENARIO <<< "$SCENARIO_INFO"
+SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR,P1_B_SCENARIO_FILE=$P1_B_SCENARIO_FILE"
+if [ -n "$RUN_ALL_SCENARIOS" ]; then
+    SBATCH_EXPORT="$SBATCH_EXPORT,RUN_ALL_SCENARIOS=1,SUPPLY_FACTOR="
+    LOG_DIR="outputs_per_country/parquet/logs_run_all_scenarios_${WORKBOOK_SCENARIO}"
+    SCENARIO_DESC="$WORKBOOK_SCENARIO, all supply factors"
+else
+    SUPPLY_FACTOR="${SUPPLY_FACTOR:-1.0}"
+    SBATCH_EXPORT="$SBATCH_EXPORT,SUPPLY_FACTOR=$SUPPLY_FACTOR,RUN_ALL_SCENARIOS=0"
+    LOG_NAME="logs_${WORKBOOK_SCENARIO}"
+    if [ "$SITING_RUN" = 1 ]; then LOG_NAME="logs"; fi
+    OUTPUT_SCENARIO="$SCENARIO"
+    SUPPLY_PCT="${SCENARIO#*_supply_}"
+    SUPPLY_PCT="${SUPPLY_PCT%%_*}"
+    if [ "$SITING_RUN" = 0 ] && compgen -G "outputs_per_country/parquet/${SCENARIO}/${ANALYSIS_YEAR}_siting_${SUPPLY_PCT}_${ISO3:-*}.xlsx" > /dev/null; then
+        OUTPUT_SCENARIO="${SCENARIO}_add_v2"
+    fi
+    LOG_DIR="outputs_per_country/parquet/${OUTPUT_SCENARIO}/${LOG_NAME}"
+    SCENARIO_DESC="$WORKBOOK_SCENARIO, supply factor $SUPPLY_FACTOR"
+fi
+echo "[INFO] Running: $SCENARIO_DESC"
+
 mkdir -p "$LOG_DIR"
 echo "[INFO] Logs will be saved to: ${LOG_DIR}/"
 
@@ -145,8 +169,9 @@ echo "Check completion:"
 echo "  find outputs_per_country/parquet -name '*.parquet' | wc -l"
 echo ""
 echo "Resource allocation summary (tiered partition strategy):"
-echo "  Tier 1 (CHN):                   1 country/script  | Long partition (168h)        | 95G, 40 CPUs"
-echo "  Tier 2 (USA, IND, BRA, etc.):   1 country/script  | Long partition (168h)        | 95G, 40 CPUs"
+echo "  USA first, CHN second: dedicated Long nodes (168h), 112 CPUs, all node memory (--mem=0)"
+echo "  Submission order does not enforce execution order; USA and CHN may run concurrently."
+echo "  Remaining Tier 2 (IND, BRA, etc.): 1 country/script | Long partition (168h)     | 95G, 40 CPUs"
 echo "  Tier 3 (CAN, MEX, AUS, etc.):   1 country/script  | Medium partition (48h)       | 95G, 40 CPUs"
 echo "  Tier 4 (TUR, NGA, COL, etc.):   2 countries/script | Short partition (12h)        | 25G, 40 CPUs"
 echo "  Tier 5 (all others):           12 countries/script | Short partition (12h)        | 25G, 40 CPUs"

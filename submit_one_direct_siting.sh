@@ -8,19 +8,20 @@
 #   ./submit_one_direct_siting.sh KEN                      # Single country, 100% scenario
 #   ./submit_one_direct_siting.sh KEN --run-all-scenarios  # Single country, all 5 scenarios
 #   ./submit_one_direct_siting.sh KEN --supply-factor 0.9  # Single country, 90% scenario
-#   ./submit_one_direct_siting.sh CHN --tier 1             # Use Tier 1 resources (high memory)
+#   ./submit_one_direct_siting.sh CHN                     # Dedicated Long node, 112 CPUs, all memory
 # ==============================================================================
 
 # --- Parse arguments ---
 RUN_ALL_SCENARIOS=""
 SUPPLY_FACTOR=""
+SCENARIO_NAME=""
 SBATCH_EXPORT=""
 ISO3=""
 TIER=""
 
 while [ $# -gt 0 ]; do
     case $1 in
-        --run-all-scenarios)
+        --run-all-supply-factors|--run-all-scenarios)
             RUN_ALL_SCENARIOS="1"
             shift
             ;;
@@ -30,6 +31,14 @@ while [ $# -gt 0 ]; do
                 exit 1
             fi
             SUPPLY_FACTOR="$2"
+            shift 2
+            ;;
+        --scenario)
+            if [ -z "$2" ] || [[ "$2" == --* ]]; then
+                echo "Error: --scenario requires 100pct, 80pct, or 60pct"
+                exit 1
+            fi
+            SCENARIO_NAME="$2"
             shift 2
             ;;
         --tier)
@@ -69,7 +78,8 @@ if [ -z "$ISO3" ]; then
     echo "  $0 CHN --tier 1             # Use Tier 1 resources (95G memory)"
     echo ""
     echo "Tier resources (siting analysis):"
-    echo "  T1: 25G, 40 CPUs, 12:00:00 (Short)  - CHN, USA, IND"
+    echo "  USA/CHN: dedicated Long node, 112 CPUs, all node memory (even with --tier)"
+    echo "  T1: 25G, 40 CPUs, 12:00:00 (Short)  - IND"
     echo "  T2: 25G, 40 CPUs, 12:00:00 (Short)  - CAN, MEX, RUS, BRA, etc."
     echo "  T3: 25G, 40 CPUs, 12:00:00 (Short)  - All others (default)"
     exit 1
@@ -79,8 +89,8 @@ fi
 ISO3=$(echo "$ISO3" | tr '[:lower:]' '[:upper:]')
 
 # --- Auto-detect tier based on country if not specified ---
-SITING_TIER_1="CHN USA IND"
-SITING_TIER_2="BRA IDN CAN RUS AUS ARG KAZ MEX SAU"
+SITING_TIER_1="IND CHN USA"
+SITING_TIER_2="ARG AUS SAU BRA CAN RUS IDN KAZ MEX"
 
 if [ -z "$TIER" ]; then
     if [[ " $SITING_TIER_1 " =~ " $ISO3 " ]]; then
@@ -115,7 +125,18 @@ case $TIER in
         ;;
 esac
 
-echo "[INFO] Resources: Partition=$PARTITION, Time=$TIME, Memory=$MEM, CPUs=$CPUS"
+EXCLUSIVE_ARGS=()
+case "$ISO3" in
+    USA|CHN)
+        PARTITION="Long"
+        TIME="168:00:00"
+        MEM="0"
+        CPUS="112"
+        EXCLUSIVE_ARGS=(--exclusive)
+        ;;
+esac
+
+echo "[INFO] Resources: Partition=$PARTITION, Time=$TIME, Memory=$MEM, CPUs=$CPUS (0 = all node memory)"
 
 # Resolve model year from config.py (override with ANALYSIS_YEAR env var if set)
 ANALYSIS_YEAR="${ANALYSIS_YEAR:-$(python - <<'PY'
@@ -126,20 +147,54 @@ PY
 echo "[INFO] Analysis year: ${ANALYSIS_YEAR}"
 
 # --- Determine scenario flag and log directory ---
-if [ -n "$SUPPLY_FACTOR" ]; then
-    SCENARIO_PCT=$(echo "$SUPPLY_FACTOR * 100" | bc | cut -d. -f1)
-    LOG_DIR="outputs_per_country/parquet/${ANALYSIS_YEAR}_supply_${SCENARIO_PCT}%/logs"
-    SCENARIO_DESC="supply factor ${SCENARIO_PCT}%"
-    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR,SUPPLY_FACTOR=$SUPPLY_FACTOR"
-elif [ -n "$RUN_ALL_SCENARIOS" ]; then
-    LOG_DIR="outputs_per_country/parquet/logs_run_all_scenarios"
-    SCENARIO_DESC="ALL scenarios (100%, 90%, 80%, 70%, 60%)"
-    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR,RUN_ALL_SCENARIOS=1"
-else
-    LOG_DIR="outputs_per_country/parquet/${ANALYSIS_YEAR}_supply_100%/logs"
-    SCENARIO_DESC="100% (default)"
-    SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR"
+SITING_RUN=1
+
+if [ -n "$SUPPLY_FACTOR" ] && [ -n "$RUN_ALL_SCENARIOS" ]; then
+    echo "Error: --supply-factor cannot be combined with --run-all-supply-factors"
+    exit 1
 fi
+if [ -n "${SCENARIO_NAME:-}" ]; then
+    case "$SCENARIO_NAME" in
+        100pct|100%|1.0|100) WORKBOOK_SCENARIO="100pct" ;;
+        80pct|80%|0.8|80) WORKBOOK_SCENARIO="80pct" ;;
+        60pct|60%|0.6|60) WORKBOOK_SCENARIO="60pct" ;;
+        *) echo "Error: unsupported scenario '$SCENARIO_NAME'"; exit 1 ;;
+    esac
+    export P1_B_SCENARIO_FILE="outputs_processed_data/p1_b_ember_2024_30_50_${WORKBOOK_SCENARIO}.xlsx"
+else
+    export P1_B_SCENARIO_FILE="${P1_B_SCENARIO_FILE:-outputs_processed_data/p1_b_ember_2024_30_50_100pct.xlsx}"
+fi
+SCENARIO_INFO=$(python - "${SUPPLY_FACTOR:-1.0}" <<'PY'
+import sys
+from config import ANALYSIS_YEAR, get_projection_scenario_name, get_supply_scenario_name
+factor = float(sys.argv[1])
+if not 0 < factor <= 1:
+    raise ValueError("Supply Factor must be greater than 0 and at most 1")
+print(get_projection_scenario_name(), get_supply_scenario_name(ANALYSIS_YEAR, factor))
+PY
+) || exit 1
+read -r WORKBOOK_SCENARIO SCENARIO <<< "$SCENARIO_INFO"
+SBATCH_EXPORT="--export=ALL,ANALYSIS_YEAR=$ANALYSIS_YEAR,P1_B_SCENARIO_FILE=$P1_B_SCENARIO_FILE"
+if [ -n "$RUN_ALL_SCENARIOS" ]; then
+    SBATCH_EXPORT="$SBATCH_EXPORT,RUN_ALL_SCENARIOS=1,SUPPLY_FACTOR="
+    LOG_DIR="outputs_per_country/parquet/logs_run_all_scenarios_${WORKBOOK_SCENARIO}"
+    SCENARIO_DESC="$WORKBOOK_SCENARIO, all supply factors"
+else
+    SUPPLY_FACTOR="${SUPPLY_FACTOR:-1.0}"
+    SBATCH_EXPORT="$SBATCH_EXPORT,SUPPLY_FACTOR=$SUPPLY_FACTOR,RUN_ALL_SCENARIOS=0"
+    LOG_NAME="logs_${WORKBOOK_SCENARIO}"
+    if [ "$SITING_RUN" = 1 ]; then LOG_NAME="logs"; fi
+    OUTPUT_SCENARIO="$SCENARIO"
+    SUPPLY_PCT="${SCENARIO#*_supply_}"
+    SUPPLY_PCT="${SUPPLY_PCT%%_*}"
+    if [ "$SITING_RUN" = 0 ] && compgen -G "outputs_per_country/parquet/${SCENARIO}/${ANALYSIS_YEAR}_siting_${SUPPLY_PCT}_${ISO3:-*}.xlsx" > /dev/null; then
+        OUTPUT_SCENARIO="${SCENARIO}_add_v2"
+    fi
+    LOG_DIR="outputs_per_country/parquet/${OUTPUT_SCENARIO}/${LOG_NAME}"
+    SCENARIO_DESC="$WORKBOOK_SCENARIO, supply factor $SUPPLY_FACTOR"
+fi
+echo "[INFO] Running: $SCENARIO_DESC"
+
 
 mkdir -p "$LOG_DIR"
 
@@ -210,6 +265,7 @@ HEREDOC_BODY
 # --- Submit the job ---
 echo "[INFO] Submitting siting analysis for ${ISO3}..."
 sbatch --job-name="ds_${ISO3}_${ANALYSIS_YEAR}"        --partition="$PARTITION" \
+       "${EXCLUSIVE_ARGS[@]}" \
        --exclude=ouce-cn62 \
        --time="$TIME" \
        --mem="$MEM" \

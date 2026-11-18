@@ -13,6 +13,22 @@ Used by:
 """
 import os
 import time
+from pathlib import Path
+
+
+def get_projection_scenario_name(projection_file=None):
+    projection_file = projection_file or os.environ.get(
+        "P1_B_SCENARIO_FILE", "outputs_processed_data/p1_b_ember_2024_30_50_100pct.xlsx"
+    )
+    scenario_name = Path(projection_file).stem.rsplit("_", 1)[-1]
+    if scenario_name not in {"100pct", "80pct", "60pct"}:
+        raise ValueError(f"Cannot identify workbook scenario from '{projection_file}'")
+    return scenario_name
+
+
+def get_supply_scenario_name(analysis_year, supply_factor, projection_file=None):
+    scenario_name = get_projection_scenario_name(projection_file)
+    return f"{analysis_year}_supply_{int(supply_factor * 100)}%_{scenario_name}"
 
 # =============================================================================
 # PATH CONFIGURATION (Local vs Cluster)
@@ -94,7 +110,7 @@ def get_bigdata_path(folder_name):
 # COMMON SETTINGS
 # =============================================================================
 COMMON_CRS = "EPSG:4326"  # WGS84 for input/output
-ANALYSIS_YEAR = int(os.environ.get("ANALYSIS_YEAR", "2024"))  # Year for supply-demand analysis: 2024, 2030, or 2050
+ANALYSIS_YEAR = int(os.environ.get("ANALYSIS_YEAR", "2050"))  # Year for supply-demand analysis: 2024, 2030, or 2050
 DEMAND_TYPES = ["Solar", "Wind", "Hydro", "Other Renewables", "Nuclear", "Fossil"]
 
 # Supply factor for sensitivity analysis: each facility supplies X% of its capacity
@@ -149,6 +165,8 @@ GRID_DISTANCE_THRESHOLD_KM = 50  # Threshold (km) to classify clusters as "remot
 DROP_PERCENTAGE = 0.01  # Drop bottom X% of settlements by demand (0.01 = 1%)
 MIN_SETTLEMENTS_PER_COMPONENT = 1  # Min settlements in a geographic component to create synthetic facilities
                                    # Set to 1 to support small island nations (e.g., MDV with 4 settlements)
+MIN_FALLBACK_FACILITY_CAPACITY_MWH = 1.0  # Small fallback facility floor for sparse viable components
+                                         # This avoids skipping valid but tiny components entirely when they still have unmet demand.
 
 # =============================================================================
 # LAND COVER FILTERING SETTINGS (p1_c, p1_d, p1_e, p1_f)
@@ -274,6 +292,8 @@ HYDRO_MIN_DISCHARGE_VIABLE_M3S = 1.0
 #   - Coastal/lowland rivers: 0.1-1 m/km (poor for hydro)
 #   - Mountain rivers: 10-50+ m/km (excellent for hydro)
 #   - 1.5 m/km allows low-head run-of-river while requiring meaningful head
+#   - RiverATLAS raw sgr_dk_rav is stored in decimeters per km, so the screening
+#     code converts to m/km with *0.1 before applying this threshold.
 HYDRO_MIN_GRADIENT_M_KM = 1.5
 
 # HYDRO_MIN_ELEVATION_M: Minimum site elevation (m above sea level)
@@ -302,7 +322,7 @@ HYDRO_MIN_STREAM_ORDER_VIABLE = 2
 # Search radius (km) around each cluster center to query viable CMIP6 centroids.
 # 100 km covers ~10× the 300 arcsec (~9.25 km) grid spacing, ensuring viable
 # candidates are found even in data-sparse regions and small island states.
-VIABILITY_SEARCH_RADIUS_KM = 100.0
+VIABILITY_SEARCH_RADIUS_KM = 300.0
 
 # When ANALYSIS_YEAR=2024 no dedicated viable-centroid layer exists.
 # If True, automatically use the 2030 layer and record the substitution in

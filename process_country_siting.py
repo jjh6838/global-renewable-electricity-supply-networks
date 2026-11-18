@@ -20,6 +20,105 @@ from pathlib import Path
 import argparse
 import sys
 import os
+
+
+SCENARIO_FILE_MAP = {
+    "100pct": "outputs_processed_data/p1_b_ember_2024_30_50_100pct.xlsx",
+    "100%": "outputs_processed_data/p1_b_ember_2024_30_50_100pct.xlsx",
+    "1.0": "outputs_processed_data/p1_b_ember_2024_30_50_100pct.xlsx",
+    "100": "outputs_processed_data/p1_b_ember_2024_30_50_100pct.xlsx",
+    "80pct": "outputs_processed_data/p1_b_ember_2024_30_50_80pct.xlsx",
+    "80%": "outputs_processed_data/p1_b_ember_2024_30_50_80pct.xlsx",
+    "0.8": "outputs_processed_data/p1_b_ember_2024_30_50_80pct.xlsx",
+    "80": "outputs_processed_data/p1_b_ember_2024_30_50_80pct.xlsx",
+    "60pct": "outputs_processed_data/p1_b_ember_2024_30_50_60pct.xlsx",
+    "60%": "outputs_processed_data/p1_b_ember_2024_30_50_60pct.xlsx",
+    "0.6": "outputs_processed_data/p1_b_ember_2024_30_50_60pct.xlsx",
+    "60": "outputs_processed_data/p1_b_ember_2024_30_50_60pct.xlsx",
+}
+
+
+def normalize_scenario_name(scenario_name):
+    """Normalize a scenario selector to the canonical 100pct/80pct/60pct name."""
+    if scenario_name is None:
+        return None
+    key = str(scenario_name).strip().lower().replace(" ", "")
+    aliases = {
+        "100pct": "100pct",
+        "100%": "100pct",
+        "1.0": "100pct",
+        "100": "100pct",
+        "80pct": "80pct",
+        "80%": "80pct",
+        "0.8": "80pct",
+        "80": "80pct",
+        "60pct": "60pct",
+        "60%": "60pct",
+        "0.6": "60pct",
+        "60": "60pct",
+    }
+    if key not in aliases:
+        valid = ", ".join(sorted(SCENARIO_FILE_MAP.keys(), key=lambda x: (len(x), x)))
+        raise ValueError(f"Unsupported scenario '{scenario_name}'. Use one of: {valid}")
+    return aliases[key]
+
+
+def get_projection_file_path(file_name=None, scenario_name=None):
+    """Return the scenario input file for country-level demand and generation data."""
+    if file_name:
+        return Path(file_name)
+    if scenario_name:
+        normalized = normalize_scenario_name(scenario_name)
+        return Path(SCENARIO_FILE_MAP[normalized])
+    env_file = os.environ.get("P1_B_SCENARIO_FILE")
+    if env_file:
+        return Path(env_file)
+    return Path("outputs_processed_data/p1_b_ember_2024_30_50_100pct.xlsx")
+
+
+def get_country_data_source(country_iso3, analysis_year=None):
+    """Return a single-label provenance value for the country-year result.
+
+    Supported labels:
+      - Observed
+      - NDC
+      - Benchmark
+      - NDC extrapolated
+      - Benchmark extrapolated
+    """
+    year = int(analysis_year) if analysis_year is not None else int(ANALYSIS_YEAR)
+    if year == 2024:
+        return "Observed"
+
+    projection_file = get_projection_file_path()
+    if not projection_file.exists():
+        return "Unknown"
+
+    try:
+        projection_df = pd.read_excel(projection_file)
+        country_row = projection_df[projection_df['ISO3_code'].astype(str).str.upper() == str(country_iso3).upper()]
+        if country_row.empty:
+            return "Unknown"
+
+        row = country_row.iloc[0]
+        source_col = "NDC_Source_2030" if year == 2030 else "NDC_Source_2050" if year == 2050 else None
+        if source_col and source_col in row.index and pd.notna(row[source_col]):
+            source_value = str(row[source_col]).strip()
+            if source_value == "NDC":
+                return "NDC" if year == 2030 else "NDC extrapolated"
+            if source_value == "Benchmark":
+                return "Benchmark" if year == 2030 else "Benchmark extrapolated"
+
+        if "Category" in row.index:
+            if pd.notna(row["Category"]):
+                return "NDC" if year == 2030 else "NDC extrapolated"
+            return "Benchmark" if year == 2030 else "Benchmark extrapolated"
+
+        return "Benchmark" if year == 2030 else "Benchmark extrapolated"
+    except Exception:
+        return "Unknown"
+
+
 from shapely.geometry import Point, LineString
 from shapely.ops import nearest_points
 from sklearn.cluster import KMeans
@@ -32,10 +131,11 @@ warnings.filterwarnings("ignore")
 
 # Import shared configuration
 from config import (
+    get_supply_scenario_name,
     COMMON_CRS, ANALYSIS_YEAR, DEMAND_TYPES, SUPPLY_FACTOR,
     CLUSTER_RADIUS_KM, CLUSTER_MIN_SAMPLES,
     GRID_DISTANCE_THRESHOLD_KM, DROP_PERCENTAGE,
-    MIN_SETTLEMENTS_PER_COMPONENT,
+    MIN_SETTLEMENTS_PER_COMPONENT, MIN_FALLBACK_FACILITY_CAPACITY_MWH,
     VIABILITY_SEARCH_RADIUS_KM, VIABILITY_FALLBACK_FOR_2024,
     get_bigdata_path,
 )
@@ -52,7 +152,7 @@ def load_country_energy_mix(country_iso3, year=2030):
         Dictionary with energy type proportions, or None if not found
     """
     try:
-        ember_file = Path('outputs_processed_data/p1_b_ember_2024_30_50.xlsx')
+        ember_file = get_projection_file_path()
         if not ember_file.exists():
             print(f"Warning: Ember data file not found: {ember_file}")
             return None
@@ -96,6 +196,48 @@ def load_country_energy_mix(country_iso3, year=2030):
     except Exception as e:
         print(f"Error loading energy mix for {country_iso3}: {e}")
         return None
+
+
+def calculate_siting_capacity_budgets(facilities_gdf, total_envelope, energy_mix):
+    """Return raw-MWh siting budgets by type, bounded by the aggregate envelope gap."""
+    mix = {
+        energy_type: max(0.0, float(energy_mix.get(energy_type, 0.0)))
+        for energy_type in DEMAND_TYPES
+    }
+    mix_total = sum(mix.values())
+    if mix_total <= 0:
+        raise ValueError("Cannot calculate siting budgets from an empty generation mix")
+
+    envelope_by_type = {
+        energy_type: total_envelope * mix[energy_type] / mix_total
+        for energy_type in DEMAND_TYPES
+    }
+    if not facilities_gdf.empty and 'total_mwh' in facilities_gdf.columns:
+        total_existing = float(facilities_gdf['total_mwh'].fillna(0).sum())
+    else:
+        total_existing = 0.0
+
+    existing_by_type = {}
+    for energy_type in DEMAND_TYPES:
+        if not facilities_gdf.empty and 'Grouped_Type' in facilities_gdf.columns and 'total_mwh' in facilities_gdf.columns:
+            existing_by_type[energy_type] = float(
+                facilities_gdf.loc[facilities_gdf['Grouped_Type'] == energy_type, 'total_mwh']
+                .fillna(0).sum()
+            )
+        else:
+            existing_by_type[energy_type] = 0.0
+
+    type_budgets = {
+        energy_type: max(0.0, envelope_by_type[energy_type] - existing_by_type[energy_type])
+        for energy_type in DEMAND_TYPES
+    }
+    aggregate_budget = max(0.0, total_envelope - total_existing)
+    positive_type_budget = sum(type_budgets.values())
+    if positive_type_budget > aggregate_budget and positive_type_budget > 0:
+        scale = aggregate_budget / positive_type_budget
+        type_budgets = {energy_type: budget * scale for energy_type, budget in type_budgets.items()}
+
+    return aggregate_budget, type_budgets, existing_by_type
 
 
 def haversine_distance_km(lat1, lon1, lat2, lon2):
@@ -716,6 +858,8 @@ def calculate_num_clusters(facilities_gdf, settlements_gdf, all_centroids_gdf=No
     
     # Calculate demand gap for settlements first
     demand_col = f'Total_Demand_{ANALYSIS_YEAR}_centroid'
+    if demand_col not in settlements_gdf.columns:
+        demand_col = f'Generation_Envelope_{ANALYSIS_YEAR}_centroid'
     if demand_col in settlements_gdf.columns:
         settlements_gdf['demand_gap_mwh'] = settlements_gdf[demand_col] - settlements_gdf['supply_received_mwh']
     else:
@@ -781,58 +925,40 @@ def calculate_num_clusters(facilities_gdf, settlements_gdf, all_centroids_gdf=No
         for energy_type, proportion in sorted(expected_mix.items()):
             print(f"  {energy_type}: {proportion:.1%}")
     
-    # Calculate expected supply by type for TOTAL demand (apply mix to total first)
-    # Then subtract what's already been supplied to find the shortfall
-    # Use centroids_for_supply (all centroids) to get accurate total demand
+    # Allocate the remaining generation-envelope budget across types, rather than
+    # distributing the residual settlement gap by the full generation mix.
     if demand_col in centroids_for_supply.columns:
         total_demand = centroids_for_supply[demand_col].sum()
     else:
         total_demand = total_supply_received + total_demand_gap
+
+    total_envelope_col = f'Generation_Envelope_{ANALYSIS_YEAR}_centroid'
+    if total_envelope_col in centroids_for_supply.columns:
+        total_generation_envelope = centroids_for_supply[total_envelope_col].sum()
+    else:
+        total_generation_envelope = total_demand
     
     print(f"\nDemand breakdown:")
     print(f"  Total demand: {total_demand:,.2f} MWh")
     print(f"  Already supplied: {total_supply_received:,.2f} MWh")
     print(f"  Remaining demand: {total_demand_gap:,.2f} MWh")
     
-    # Step 1: Apply energy mix to DEMAND GAP (unfilled demand) to get expected synthetic capacity
-    # We're only creating synthetic facilities for the unfilled portion
-    # IMPORTANT: This needs to account for SUPPLY_FACTOR and the analysis year
-    # The synthetic capacity should ramp up to match: demand_gap × energy_mix × (1 / SUPPLY_FACTOR)
-    # This ensures that after applying SUPPLY_FACTOR in process_country_supply.py,
-    # Available_Supply_MWh = demand_gap
-    
-    expected_supply_by_type = {}
+    # Siting facilities are raw MWh; process_country_supply applies SUPPLY_FACTOR.
+    total_addition_budget, shortfall_by_type, existing_capacity_by_type = calculate_siting_capacity_budgets(
+        facilities_gdf, total_generation_envelope, expected_mix
+    )
+    print(
+        f"\nSiting capacity budget: {total_addition_budget:,.2f} MWh raw capacity "
+        f"(generation envelope={total_generation_envelope:,.2f} MWh)"
+    )
     for energy_type in DEMAND_TYPES:
-        # Expected synthetic capacity = demand_gap × mix proportion × (1 / SUPPLY_FACTOR)
-        # Example: If demand_gap = 1000 MWh, mix = 50%, SUPPLY_FACTOR = 1.0 (100%)
-        #          then synthetic capacity = 1000 × 0.5 × (1/1.0) = 500 MWh
-        # Example: If SUPPLY_FACTOR = 0.6 (60% sensitivity analysis)
-        #          then synthetic capacity = 1000 × 0.5 × (1/0.6) = 833 MWh
-        #          so after applying SUPPLY_FACTOR: 833 × 0.6 = 500 MWh available
-        if SUPPLY_FACTOR > 0:
-            expected_supply_by_type[energy_type] = (total_demand_gap * expected_mix[energy_type]) / SUPPLY_FACTOR
-        else:
-            expected_supply_by_type[energy_type] = total_demand_gap * expected_mix[energy_type]
-    
-    print(f"\nExpected synthetic capacity by energy type (from remaining {total_demand_gap:,.2f} MWh):")
-    print(f"  (Adjusted for SUPPLY_FACTOR={SUPPLY_FACTOR*100:.0f}% - capacity will be scaled by 1/{SUPPLY_FACTOR})")
-    for energy_type, expected_mwh in sorted(expected_supply_by_type.items()):
-        if expected_mwh > 0:
-            available_after_factor = expected_mwh * SUPPLY_FACTOR
-            print(f"  {energy_type}: {expected_mwh:,.2f} MWh capacity → {available_after_factor:,.2f} MWh available after factor")
-    
-    # Step 2: Calculate shortfall for synthetic facilities
-    # Since we filtered to unfilled settlements, shortfall = expected capacity needed
-    shortfall_by_type = {}
-    for energy_type in DEMAND_TYPES:
-        shortfall = expected_supply_by_type[energy_type]
-        if shortfall > 0:
-            shortfall_by_type[energy_type] = shortfall
-    
-    print(f"\nSynthetic facility capacity needed by energy type:")
-    for energy_type, shortfall in sorted(shortfall_by_type.items()):
-        if shortfall > 0:
-            print(f"  {energy_type}: {shortfall:,.2f} MWh")
+        budget = shortfall_by_type[energy_type]
+        if budget > 0:
+            print(
+                f"  {energy_type}: envelope={total_generation_envelope * expected_mix[energy_type]:,.2f}, "
+                f"existing={existing_capacity_by_type[energy_type]:,.2f}, "
+                f"siting budget={budget:,.2f} MWh"
+            )
     
     # Filter facilities with remaining capacity (for reference/logging only)
     # Handle case where facilities_gdf is empty or missing 'remaining_mwh' column
@@ -905,10 +1031,16 @@ def calculate_num_clusters(facilities_gdf, settlements_gdf, all_centroids_gdf=No
             proportion = comp_demand / total_viable_demand
             facility_capacity = total_shortfall * proportion
             
-            # Skip if capacity is too small (< 1 MWh)
-            if facility_capacity < 1:
+            # Create a small fallback facility for viable sparse components instead of
+            # dropping them entirely when the proportional allocation is tiny but non-zero.
+            # Cap fallback at the component's unmet demand to avoid creating more capacity than the
+            # component actually needs.
+            if facility_capacity < MIN_FALLBACK_FACILITY_CAPACITY_MWH:
+                facility_capacity = min(comp_demand, MIN_FALLBACK_FACILITY_CAPACITY_MWH)
+
+            if facility_capacity <= 0:
                 continue
-            
+
             comp_settlements = settlements_gdf_temp[settlements_gdf_temp['geo_component'] == comp_id]
             
             # Calculate optimal location: weighted centroid of settlements in this component
@@ -1350,9 +1482,9 @@ def calculate_cluster_centers(settlements_gdf, facilities_gdf, clusters_per_type
     print(f"  Total facility allocations: {len(cluster_centers_gdf)}")
     print(f"  Unique clusters served: {cluster_centers_gdf['original_cluster_id'].nunique()}")
     print(f"  Total capacity allocated: {cluster_centers_gdf['remaining_mwh'].sum():,.2f} MWh")
-    print(f"  Total cluster demand: {clusters_df['total_demand_mwh'].sum():,.2f} MWh")
-    print(f"  Total demand satisfied: {clusters_df['total_demand_mwh'].sum() - clusters_df['remaining_demand'].sum():,.2f} MWh")
-    print(f"  Demand coverage: {(1 - clusters_df['remaining_demand'].sum() / clusters_df['total_demand_mwh'].sum()) * 100:.1f}%")
+    print(f"  Total generation envelope: {clusters_df['total_demand_mwh'].sum():,.2f} MWh")
+    print(f"  Generation envelope satisfied: {clusters_df['total_demand_mwh'].sum() - clusters_df['remaining_demand'].sum():,.2f} MWh")
+    print(f"  Allocation coverage: {(1 - clusters_df['remaining_demand'].sum() / clusters_df['total_demand_mwh'].sum()) * 100:.1f}%")
     
     print(f"\nAllocations by energy type:")
     for energy_type in sorted(cluster_centers_gdf['Grouped_Type'].unique()):
@@ -1698,7 +1830,7 @@ def clip_clusters_to_boundaries(cluster_centers_gdf, admin_boundaries):
 def save_outputs(settlements_gdf, cluster_centers_gdf, networks_gdf, country_iso3, 
                 output_dir="outputs_per_country", has_grid=True, has_facilities=True):
     """Save all outputs to parquet files with detailed summary."""
-    scenario_suffix = f"{ANALYSIS_YEAR}_supply_{int(SUPPLY_FACTOR*100)}%"
+    scenario_suffix = get_supply_scenario_name(ANALYSIS_YEAR, SUPPLY_FACTOR, get_projection_file_path())
     output_path = Path(output_dir) / "parquet" / scenario_suffix
     output_path.mkdir(parents=True, exist_ok=True)
     
@@ -1727,6 +1859,7 @@ def save_outputs(settlements_gdf, cluster_centers_gdf, networks_gdf, country_iso
     config_params = [
         ('Country', country_iso3),
         ('Analysis_Year', ANALYSIS_YEAR),
+        ('Data_Source', get_country_data_source(country_iso3, ANALYSIS_YEAR)),
         ('Supply_Factor_Pct', SUPPLY_FACTOR * 100),
         ('', ''),
         ('--- INFRASTRUCTURE STATUS ---', ''),
@@ -1740,7 +1873,7 @@ def save_outputs(settlements_gdf, cluster_centers_gdf, networks_gdf, country_iso
         ('', ''),
         ('--- SETTLEMENTS ---', ''),
         ('Total_Unfilled_Settlements', total_settlements),
-        ('Total_Demand_Gap_MWh', total_demand),
+        ('Generation_Envelope_Gap_MWh', total_demand),
         ('', ''),
         ('--- CLUSTERS ---', ''),
         ('Unique_Clusters_Formed', total_clusters),
@@ -1787,13 +1920,68 @@ def save_outputs(settlements_gdf, cluster_centers_gdf, networks_gdf, country_iso
     print(f"Saved summary: {summary_file}")
 
 
+def cap_siting_capacity_to_envelope(cluster_centers_gdf, facilities_gdf, centroids_gdf, country_iso3):
+    """Keep added siting capacity within the remaining envelope, overall and by type."""
+    if cluster_centers_gdf.empty or 'remaining_mwh' not in cluster_centers_gdf.columns:
+        return cluster_centers_gdf
+
+    total_envelope_col = f'Generation_Envelope_{ANALYSIS_YEAR}_centroid'
+    legacy_envelope_col = f'Total_Demand_{ANALYSIS_YEAR}_centroid'
+    if total_envelope_col in centroids_gdf.columns:
+        total_envelope = float(centroids_gdf[total_envelope_col].fillna(0).sum())
+    elif legacy_envelope_col in centroids_gdf.columns:
+        total_envelope = float(centroids_gdf[legacy_envelope_col].fillna(0).sum())
+    else:
+        raise ValueError(
+            f"Cannot cap siting capacity: neither '{total_envelope_col}' nor "
+            f"'{legacy_envelope_col}' exists in centroid data"
+        )
+
+    energy_mix = load_country_energy_mix(country_iso3, year=ANALYSIS_YEAR)
+    if energy_mix is None:
+        energy_mix = {
+            "Fossil": 0.60,
+            "Solar": 0.15,
+            "Wind": 0.10,
+            "Hydro": 0.08,
+            "Nuclear": 0.05,
+            "Other Renewables": 0.02,
+        }
+    total_addition_budget, type_budgets, _ = calculate_siting_capacity_budgets(
+        facilities_gdf, total_envelope, energy_mix
+    )
+    capped = cluster_centers_gdf.copy()
+    unknown_type_mask = ~capped['Grouped_Type'].isin(DEMAND_TYPES)
+    capped.loc[unknown_type_mask, 'remaining_mwh'] = 0.0
+
+    for energy_type in DEMAND_TYPES:
+        type_mask = capped['Grouped_Type'] == energy_type
+        proposed = float(capped.loc[type_mask, 'remaining_mwh'].fillna(0).sum())
+        type_budget = type_budgets[energy_type]
+        if proposed > type_budget and proposed > 0:
+            capped.loc[type_mask, 'remaining_mwh'] *= type_budget / proposed
+
+    proposed_total = float(capped['remaining_mwh'].fillna(0).sum())
+    if proposed_total > total_addition_budget and proposed_total > 0:
+        capped['remaining_mwh'] *= total_addition_budget / proposed_total
+
+    capped = capped[capped['remaining_mwh'] > 0].copy()
+    print(
+        f"Siting capacity cap: envelope={total_envelope:,.2f} MWh, "
+        f"existing={total_envelope - total_addition_budget:,.2f} MWh, "
+        f"added={capped['remaining_mwh'].sum():,.2f} MWh, "
+        f"budget={total_addition_budget:,.2f} MWh"
+    )
+    return capped
+
+
 def process_country_siting(country_iso3, output_dir="outputs_per_country"):
     """Main function to process siting analysis for a single country."""
     print("\n" + "="*60)
     print(f"SITING ANALYSIS FOR {country_iso3}")
     print("="*60)
     
-    scenario_suffix = f"{ANALYSIS_YEAR}_supply_{int(SUPPLY_FACTOR*100)}%"
+    scenario_suffix = get_supply_scenario_name(ANALYSIS_YEAR, SUPPLY_FACTOR, get_projection_file_path())
     
     try:
         admin_boundaries = load_admin_boundaries(country_iso3)
@@ -1869,6 +2057,9 @@ def process_country_siting(country_iso3, output_dir="outputs_per_country"):
         cluster_centers_gdf = rebalance_viability_by_type(
             cluster_centers_gdf, viable_cache, viability_file_year
         )
+        cluster_centers_gdf = cap_siting_capacity_to_envelope(
+            cluster_centers_gdf, facilities_gdf, centroids_gdf, country_iso3
+        )
 
         cluster_centers_gdf = compute_grid_distances(cluster_centers_gdf, grid_lines_gdf)
         networks_gdf = build_remote_networks(settlements_gdf, cluster_centers_gdf, grid_lines_gdf)
@@ -1924,12 +2115,20 @@ def main():
     parser.add_argument('country_iso3', help='ISO3 country code')
     parser.add_argument('--output-dir', default='outputs_per_country', 
                        help='Output directory')
-    parser.add_argument('--run-all-scenarios', action='store_true',
-                       help='Run all supply scenarios: 100%%, 90%%, 80%%, 70%%, 60%%')
+    parser.add_argument('--run-all-supply-factors', '--run-all-scenarios', dest='run_all_scenarios',
+                       action='store_true',
+                       help='Run all supply factors: 100%%, 90%%, 80%%, 70%%, 60%%. Legacy alias: --run-all-scenarios.')
     parser.add_argument('--supply-factor', type=float, default=None,
-                       help='Run a single supply factor (e.g., 0.9 for 90%%). Overrides --run-all-scenarios.')
+                       help='Run a single supply factor (e.g., 0.9 for 90%%). Overrides --run-all-supply-factors.')
+    parser.add_argument('--scenario', dest='scenario_name', default=None,
+                       help='Scenario input file selector: 100pct, 80pct, or 60pct (also accepts 100%%/80%%/60%%). Overrides P1_B_SCENARIO_FILE.')
     
     args = parser.parse_args()
+
+    if args.scenario_name is not None:
+        scenario_file = get_projection_file_path(scenario_name=args.scenario_name)
+        os.environ['P1_B_SCENARIO_FILE'] = str(scenario_file)
+        print(f"[INFO] Using scenario file: {scenario_file}")
     
     # Determine which scenarios to run
     if args.supply_factor is not None:

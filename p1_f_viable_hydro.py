@@ -469,8 +469,9 @@ def run_part3_viable_centroids(out_dir: Path, landcover_path: Path = None,
         'delta': river_2030['delta_2030'].values,
         'dis_m3_pyr_projected': river_2030['dis_m3_pyr_2030'].values,
         'ORD_STRA': safe_get(river_2030, 'ORD_STRA'),
-        'sgr_dk_rav': safe_get(river_2030, 'sgr_dk_rav'),  # Gradient (m/km)
-        'ele_mt_cav': safe_get(river_2030, 'ele_mt_cav'),  # Elevation (m)
+        'sgr_dk_rav_raw': safe_get(river_2030, 'sgr_dk_rav'),
+        'sgr_dk_rav': safe_get(river_2030, 'sgr_dk_rav') * 0.1,  # HydroATLAS stores gradient in decimeters per km; convert to m/km
+        'ele_mt_cav': safe_get(river_2030, 'ele_mt_cav'),  # Mean local catchment elevation (m); screening proxy, not hydraulic head
         'UPLAND_SKM': safe_get(river_2030, 'UPLAND_SKM'),  # Catchment area (km²)
     }, crs="EPSG:4326")
     
@@ -483,8 +484,9 @@ def run_part3_viable_centroids(out_dir: Path, landcover_path: Path = None,
         'delta': river_2050['delta_2050'].values,
         'dis_m3_pyr_projected': river_2050['dis_m3_pyr_2050'].values,
         'ORD_STRA': safe_get(river_2050, 'ORD_STRA'),
-        'sgr_dk_rav': safe_get(river_2050, 'sgr_dk_rav'),  # Gradient (m/km)
-        'ele_mt_cav': safe_get(river_2050, 'ele_mt_cav'),  # Elevation (m)
+        'sgr_dk_rav_raw': safe_get(river_2050, 'sgr_dk_rav'),
+        'sgr_dk_rav': safe_get(river_2050, 'sgr_dk_rav') * 0.1,  # HydroATLAS stores gradient in decimeters per km; convert to m/km
+        'ele_mt_cav': safe_get(river_2050, 'ele_mt_cav'),  # Mean local catchment elevation (m); screening proxy, not hydraulic head
         'UPLAND_SKM': safe_get(river_2050, 'UPLAND_SKM'),  # Catchment area (km²)
     }, crs="EPSG:4326")
     
